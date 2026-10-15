@@ -148,6 +148,34 @@ describe("YouTube SPA lifecycle", () => {
     expect(h.sent).toEqual([{ type: "PAGE_CHANGED", videoId }]);
   });
 
+  it("rebinds subtitles when the same video moves into a replacement player", async () => {
+    const { video, container } = mediaFixture(); const h = harness();
+    await h.send({ type: "SET_SUBTITLES", videoId, enabled: true, document: subtitles() });
+    const replacement = document.createElement("div"); replacement.className = "html5-video-player";
+    replacement.append(video); container.replaceWith(replacement);
+    await vi.waitFor(() => expect(replacement.querySelector(".ytwhisper-caption")?.textContent).toBe("Hello"));
+    expect(container.querySelector("[data-ytwhisper-overlay]")).toBeNull();
+    expect(video.currentTime).toBe(0);
+    expect(frames.size).toBe(1);
+    expect(h.sent).toEqual([{ type: "PAGE_CHANGED", videoId }]);
+  });
+
+  it.each(["failed", "canceled"] as const)("preserves the original playing state across temporary metadata loss before %s", async status => {
+    const { video } = mediaFixture(); const h = harness();
+    await h.send({ type: "START_JOB", videoId });
+    Object.defineProperty(video, "duration", { configurable: true, value: NaN });
+    video.dispatchEvent(new Event("emptied"));
+    expect(await h.send({ type: "GET_PAGE_STATE" })).toEqual({ ok: true, page: null });
+    expect(document.querySelector("[data-ytwhisper-overlay]")).toBeNull();
+    Object.defineProperty(video, "duration", { value: 10 });
+    video.dispatchEvent(new Event("loadedmetadata"));
+    expect(await h.send({ type: "SET_PROGRESS", videoId, snapshot: progress(status) })).toMatchObject({ ok: true });
+    expect(video.paused).toBe(false);
+    expect(video.currentTime).toBe(4.25);
+    expect(video.playbackRate).toBe(1.5);
+    expect(h.sent).toEqual([{ type: "PAGE_CHANGED", videoId }]);
+  });
+
   it("preserves the saved playback state when YouTube removes the overlay during processing", async () => {
     const { video } = mediaFixture(); const h = harness();
     await h.send({ type: "START_JOB", videoId });

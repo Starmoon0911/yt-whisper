@@ -21,6 +21,7 @@ class ContentController {
   private player: PlayerController;
   private overlay: SubtitleOverlay | null = null;
   private boundVideo: HTMLVideoElement | null = null;
+  private boundContainer: HTMLElement | null = null;
   private videoId: string | null | undefined;
   private subtitles: SubtitleDocument | null = null;
   private progress: JobSnapshot | null = null;
@@ -96,18 +97,22 @@ class ContentController {
     if (this.disposed) return;
     const videoId = extractVideoId(this.document.location.href);
     if (videoId !== this.videoId) {
-      this.overlay?.destroy(); this.overlay = null; this.boundVideo = null;
+      this.overlay?.destroy(); this.overlay = null; this.boundVideo = null; this.boundContainer = null;
       this.videoId = videoId; this.subtitles = null; this.progress = null; this.enabled = true;
       this.player.forgetProcessing();
       // This is the only content -> worker message. Worker commands stay local.
       void this.notify({ type: "PAGE_CHANGED", videoId }).catch(() => {});
     }
-    const video = this.player.snapshot() ? this.player.video : null;
-    if (video === this.boundVideo && (!video || this.overlay?.mounted)) return;
+    // Metadata readiness can change without changing media identity. Retain the
+    // processing snapshot until the actual video element or watch ID changes.
+    const video = this.player.video;
+    const container = this.player.container;
+    const eligible = this.player.snapshot() !== null;
+    if (video === this.boundVideo && container === this.boundContainer && (eligible ? this.overlay?.mounted : !this.overlay)) return;
     if (video !== this.boundVideo) this.player.forgetProcessing();
-    this.overlay?.destroy(); this.overlay = null; this.boundVideo = video;
-    if (video && videoId && this.player.container) {
-      this.overlay = new SubtitleOverlay(this.player.container, video, videoId);
+    this.overlay?.destroy(); this.overlay = null; this.boundVideo = video; this.boundContainer = container;
+    if (eligible && video && videoId && container) {
+      this.overlay = new SubtitleOverlay(container, video, videoId);
       if (this.subtitles) this.overlay.setDocument(this.subtitles);
       this.overlay.setEnabled(this.enabled);
       if (this.progress) {

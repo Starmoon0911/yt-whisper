@@ -43,7 +43,7 @@ export class SubtitleOverlay {
 
   get hasDocument(): boolean { return this.document !== null; }
   get enabled(): boolean { return this.visible; }
-  get mounted(): boolean { return !this.disposed && this.root.parentElement === this.container; }
+  get mounted(): boolean { return !this.disposed && this.root.isConnected && this.root.parentElement === this.container; }
 
   setDocument(document: SubtitleDocument): boolean {
     if (this.disposed || !validDocument(document, this.videoId)) return false;

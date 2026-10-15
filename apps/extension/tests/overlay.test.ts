@@ -93,6 +93,13 @@ describe("subtitle overlay timeline", () => {
     expect(frames.size).toBe(0);
   });
 
+  it("does not report an overlay in a detached player as mounted", () => {
+    const { overlay, container } = fixture();
+    expect(overlay.mounted).toBe(true);
+    container.remove();
+    expect(overlay.mounted).toBe(false);
+  });
+
   it.each(["normal", "theater", "fullscreen"])("keeps the overlay in the player when layout becomes %s", mode => {
     const { overlay, video, container, caption } = fixture();
     video.currentTime = 0; overlay.setDocument(subtitles());
