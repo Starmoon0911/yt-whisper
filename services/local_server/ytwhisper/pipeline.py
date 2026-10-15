@@ -41,8 +41,8 @@ class MediaPipeline:
             on_state("downloading")
             check_cancelled(cancel_event)
             downloaded = self.runner.run(
-                [sys.executable, "-m", "yt_dlp", "--no-playlist", "--no-progress",
-                 "--match-filter", "!is_live", "--format", "bestaudio", "--output",
+                [sys.executable, "-m", "yt_dlp", "--ignore-config", "--no-playlist",
+                 "--no-progress", "--match-filter", "!is_live", "--format", "bestaudio", "--output",
                  str(work_dir / "source.%(ext)s"), "--print", "after_move:filepath", url],
                 lambda progress: None,
                 cancel_event,

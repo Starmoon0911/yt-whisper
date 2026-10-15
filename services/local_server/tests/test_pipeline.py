@@ -361,6 +361,59 @@ class WhisperWorkerTests(unittest.TestCase):
 
 
 class MediaPipelineTests(unittest.TestCase):
+    def test_download_ignores_cookie_and_temporary_path_configuration(self):
+        # Catches yt-dlp inheriting browser-cookie access or files outside the job directory.
+        from yt_dlp import parse_options
+
+        from ytwhisper.pipeline import MediaPipeline
+
+        for location in ("portable", "home", "user", "system"):
+            with self.subTest(location=location), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                work_dir = root / "work"
+                config_paths = {
+                    "portable": root / "portable" / "yt-dlp.conf",
+                    "home": root / "home" / "yt-dlp.conf",
+                    "user": root / "user" / "yt-dlp" / "config",
+                    "system": root / "system" / "yt-dlp" / "config",
+                }
+                config = config_paths[location]
+                config.parent.mkdir(parents=True)
+                outside = root / "outside-owned-work-directory"
+                config.write_text(
+                    f'--cookies-from-browser chrome\n--paths "temp:{outside}"\n',
+                    encoding="utf-8",
+                )
+                runner = ScriptedRunner(work_dir)
+                MediaPipeline(CacheStore(root / "cache"), runner=runner).process(
+                    REQUEST, work_dir, lambda state: None, threading.Event(),
+                )
+                arguments = runner.commands[0][3:]
+                with (
+                    patch("yt_dlp.options.get_executable_path",
+                          return_value=str(root / "portable")),
+                    patch("yt_dlp.options.expand_path", return_value=str(root / "home")),
+                    patch("yt_dlp.options.get_user_config_dirs",
+                          return_value=[str(root / "user" / "yt-dlp")]),
+                    patch("yt_dlp.options.get_system_config_dirs",
+                          return_value=[str(root / "system" / "yt-dlp")]),
+                ):
+                    # Use the real CLI parser, since passing argv directly to parse_options
+                    # disables automatic config discovery before the flag is considered.
+                    with patch.object(sys, "argv", ["yt-dlp", *[
+                        argument for argument in arguments if argument != "--ignore-config"
+                    ]]):
+                        inherited = parse_options().ydl_opts
+                    self.assertEqual(inherited["cookiesfrombrowser"][0], "chrome")
+                    self.assertEqual(inherited["paths"]["temp"], str(outside))
+                    with patch.object(sys, "argv", ["yt-dlp", *arguments]):
+                        isolated = parse_options().ydl_opts
+                self.assertIsNone(isolated["cookiesfrombrowser"])
+                self.assertIsNone(isolated["cookiefile"])
+                self.assertNotIn("temp", isolated["paths"])
+                self.assertFalse(outside.exists())
+                self.assertFalse(work_dir.exists())
+
     def test_cancellation_during_cache_serialization_preserves_previous_document(self):
         # Catches cancellation during a slow write replacing valid existing subtitles.
         from ytwhisper.pipeline import MediaPipeline
@@ -699,8 +752,8 @@ class MediaPipelineTests(unittest.TestCase):
             )
 
             self.assertEqual(runner.commands, [
-                [sys.executable, "-m", "yt_dlp", "--no-playlist", "--no-progress",
-                 "--match-filter", "!is_live", "--format", "bestaudio", "--output",
+                [sys.executable, "-m", "yt_dlp", "--ignore-config", "--no-playlist",
+                 "--no-progress", "--match-filter", "!is_live", "--format", "bestaudio", "--output",
                  str(work_dir / "source.%(ext)s"), "--print", "after_move:filepath",
                  f"https://www.youtube.com/watch?v={VIDEO_ID}"],
                 ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i",
