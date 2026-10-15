@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ytWhisper</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header><h1>ytWhisper</h1><button id="refresh" type="button" aria-label="重新整理狀態">重新整理</button></header>
+      <p id="service-status" role="status">正在連線到本機服務…</p>
+      <form id="pair-form" hidden>
+        <label for="pair-code">本機服務顯示的六位數配對碼</label>
+        <div class="pair-row"><input id="pair-code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" required placeholder="123456"><button id="pair" type="submit">配對</button></div>
+      </form>
+      <section aria-labelledby="video-title">
+        <h2 id="video-title">正在讀取影片…</h2>
+        <p id="video-detail"></p>
+        <p id="job-status" role="status" aria-live="polite"></p>
+        <progress id="progress" max="1" hidden aria-label="字幕處理進度"></progress>
+        <button id="start" type="button" class="primary" disabled>產生／載入字幕</button>
+        <div class="actions"><button id="cancel" type="button" hidden>取消處理</button><button id="regenerate" type="button" disabled>重新產生</button></div>
+        <label class="toggle"><input id="subtitles" type="checkbox" disabled> 顯示字幕</label>
+      </section>
+      <p id="error" role="alert" hidden></p>
+      <footer>在此 Mac 處理音訊 · 保留影片原始語言</footer>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "ytWhisper — 地端 YouTube 字幕",
+  "version": "0.1.0",
+  "description": "使用此 Mac 的 Whisper 為公開 YouTube 影片產生原語言字幕。",
+  "minimum_chrome_version": "120",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["http://127.0.0.1:8765/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_popup": "popup.html", "default_title": "ytWhisper" }
+}

@@ -1,0 +1,26 @@
+:root { font: 14px/1.5 system-ui, sans-serif; color: #202124; background: #f8fafc; color-scheme: light; }
+body { margin: 0; width: 340px; }
+main { padding: 20px; }
+header, .pair-row, .actions { display: flex; align-items: center; gap: 10px; }
+header { justify-content: space-between; }
+h1 { font-size: 20px; margin: 0; letter-spacing: -.5px; }
+h2 { font-size: 16px; line-height: 1.5; margin: 0 0 6px; overflow-wrap: anywhere; }
+p { margin: 10px 0; }
+section { padding: 16px; margin-top: 16px; border: 1px solid #dde3ea; border-radius: 12px; background: #fff; }
+button, input { font: inherit; }
+button { border: 1px solid #cbd5e1; border-radius: 7px; padding: 7px 10px; background: #fff; color: #202124; cursor: pointer; }
+button:hover:enabled { background: #edf2f7; }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { width: 100%; margin: 12px 0 8px; background: #2458d3; border-color: #2458d3; color: #fff; }
+button.primary:hover:enabled { background: #1747b3; }
+button:focus-visible, input:focus-visible { outline: 3px solid #93b4ff; outline-offset: 2px; }
+#refresh { font-size: 12px; }
+#service-status, #video-detail, footer { color: #526075; font-size: 12px; }
+#pair-form { padding: 12px; background: #edf3ff; border-radius: 8px; }
+.pair-row { margin-top: 8px; }
+#pair-code { width: 140px; min-width: 0; border: 1px solid #94a3b8; border-radius: 5px; padding: 7px; letter-spacing: 3px; }
+.toggle { display: flex; gap: 6px; align-items: center; margin-top: 16px; }
+progress { width: 100%; accent-color: #2458d3; }
+#error { color: #9b1c27; background: #fff0f1; border-radius: 8px; padding: 10px; overflow-wrap: anywhere; }
+footer { margin-top: 16px; text-align: center; }
+[hidden] { display: none !important; }
