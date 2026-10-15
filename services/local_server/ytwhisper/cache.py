@@ -2,7 +2,9 @@ import json
 import os
 import re
 import tempfile
+from concurrent.futures import CancelledError
 from pathlib import Path
+from threading import Event
 from typing import Any, Literal, TypedDict
 
 from .cues import SubtitleCue
@@ -71,15 +73,21 @@ class CacheStore:
             previous_end = end
         return document
 
-    def store(self, document: dict[str, Any]) -> None:
+    def store(self, document: dict[str, Any], *, cancel_event: Event | None = None) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise CancelledError("Subtitle generation canceled")
         path = self.path_for(str(document["videoId"]))
         path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, temp_name = tempfile.mkstemp(prefix=f".{path.stem}-", suffix=".tmp", dir=path.parent)
+        descriptor, temp_name = tempfile.mkstemp(
+            prefix=f".{path.stem}-", suffix=".tmp", dir=path.parent,
+        )
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 json.dump(document, handle, ensure_ascii=False, separators=(",", ":"))
                 handle.flush()
                 os.fsync(handle.fileno())
+            if cancel_event is not None and cancel_event.is_set():
+                raise CancelledError("Subtitle generation canceled")
             os.replace(temp_name, path)
         finally:
             if os.path.exists(temp_name):

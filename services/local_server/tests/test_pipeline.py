@@ -4,8 +4,8 @@ import signal
 import subprocess
 import sys
 import tempfile
-import time
 import threading
+import time
 import unittest
 import wave
 from concurrent.futures import CancelledError
@@ -16,7 +16,6 @@ from unittest.mock import patch
 
 from ytwhisper.cache import CacheStore
 
-
 VIDEO_ID = "dQw4w9WgXcQ"
 MODEL = "mlx-community/whisper-large-v3-turbo"
 REQUEST = {"url": f"https://youtu.be/{VIDEO_ID}?t=2", "videoId": VIDEO_ID,
@@ -25,6 +24,11 @@ WHISPER_RESULT = {"language": "zh", "duration": 10.0, "words": [
     {"start": 0.0, "end": 0.9, "word": "你好。"},
     {"start": 1.1, "end": 2.4, "word": "世界！"},
 ]}
+PREVIOUS_DOCUMENT = {
+    "schemaVersion": 1, "videoId": VIDEO_ID, "language": "en", "durationMs": 10000,
+    "model": MODEL, "generatedAt": "2026-10-15T00:00:00Z",
+    "cues": [{"startMs": 0, "endMs": 900, "text": "Previous transcript."}],
+}
 
 
 class ScriptedRunner:
@@ -52,6 +56,98 @@ class ScriptedRunner:
 
 
 class CommandRunnerTests(unittest.TestCase):
+    def test_cancellation_when_communication_finishes_does_not_return_success(self):
+        # Catches cancellation arriving after the last polling check but before return.
+        from ytwhisper.media import CommandRunner
+
+        cancel_event = threading.Event()
+        command = [sys.executable, "-c", "print('finished')"]
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            start_new_session=True,
+        )
+        communicate = process.communicate
+
+        def finish_and_cancel(*args, **kwargs):
+            output = communicate(*args, **kwargs)
+            cancel_event.set()
+            return output
+
+        with (
+            patch("ytwhisper.media.subprocess.Popen", return_value=process),
+            patch.object(process, "communicate", side_effect=finish_and_cancel),
+            self.assertRaises(CancelledError),
+        ):
+            CommandRunner().run(command, lambda progress: None, cancel_event)
+
+    def test_cancellation_from_progress_callback_does_not_return_success(self):
+        # Catches a progress observer canceling a command that then reports success.
+        from ytwhisper.media import CommandRunner
+
+        cancel_event = threading.Event()
+        with self.assertRaises(CancelledError):
+            CommandRunner().run(
+                [sys.executable, "-c", "print('finished')"],
+                lambda progress: cancel_event.set(), cancel_event,
+            )
+
+    def test_cancel_kills_stubborn_descendant_even_after_output_pipes_close(self):
+        # Catches stopping once the parent exits while a detached-output child survives.
+        from ytwhisper.media import CommandRunner
+
+        with tempfile.TemporaryDirectory() as directory:
+            pid_file = Path(directory) / "child-pid"
+            cancel_event = threading.Event()
+            outcomes = []
+            child_code = (
+                "import os,pathlib,signal,sys,time; "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); os.close(1); os.close(2); "
+                "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(10)"
+            )
+            command = [sys.executable, "-c",
+                       ("import subprocess,sys,time; "
+                       "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2]]); "
+                       "time.sleep(10)"), child_code, str(pid_file)]
+
+            def run():
+                try:
+                    outcomes.append(CommandRunner().run(
+                        command, lambda progress: None, cancel_event,
+                    ))
+                except Exception as error:  # noqa: BLE001 - surface errors from the test thread.
+                    outcomes.append(error)
+
+            thread = threading.Thread(target=run)
+            thread.start()
+            pid = None
+            try:
+                deadline = time.monotonic() + 2
+                while not pid_file.exists() and time.monotonic() < deadline:
+                    cancel_event.wait(0.01)
+                self.assertTrue(pid_file.exists(), "local descendant did not start")
+                pid = int(pid_file.read_text())
+                cancel_event.set()
+                thread.join(1.5)
+                self.assertFalse(thread.is_alive(), "runner did not finish cancellation")
+                self.assertIsInstance(outcomes[0], CancelledError)
+                deadline = time.monotonic() + 1
+                while time.monotonic() < deadline:
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.01)
+                else:
+                    self.fail("stubborn descendant survived after its parent exited")
+            finally:
+                cancel_event.set()
+                if pid is not None:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                thread.join(2)
+
     def test_already_canceled_command_never_starts_a_process(self):
         # Catches spawning external work after cancellation was already requested.
         from ytwhisper.media import CommandRunner
@@ -80,7 +176,9 @@ class CommandRunnerTests(unittest.TestCase):
 
             def run():
                 try:
-                    outcomes.append(CommandRunner().run(command, lambda progress: None, cancel_event))
+                    outcomes.append(CommandRunner().run(
+                        command, lambda progress: None, cancel_event,
+                    ))
                 except BaseException as error:
                     outcomes.append(error)
 
@@ -121,7 +219,9 @@ class CommandRunnerTests(unittest.TestCase):
 
             def run():
                 try:
-                    outcomes.append(CommandRunner().run(command, lambda progress: None, cancel_event))
+                    outcomes.append(CommandRunner().run(
+                        command, lambda progress: None, cancel_event,
+                    ))
                 except BaseException as error:
                     outcomes.append(error)
 
@@ -166,7 +266,9 @@ class CommandRunnerTests(unittest.TestCase):
 
             def run():
                 try:
-                    outcomes.append(CommandRunner().run(command, lambda progress: None, cancel_event))
+                    outcomes.append(CommandRunner().run(
+                        command, lambda progress: None, cancel_event,
+                    ))
                 except BaseException as error:
                     outcomes.append(error)
 
@@ -259,6 +361,144 @@ class WhisperWorkerTests(unittest.TestCase):
 
 
 class MediaPipelineTests(unittest.TestCase):
+    def test_cancellation_during_cache_serialization_preserves_previous_document(self):
+        # Catches cancellation during a slow write replacing valid existing subtitles.
+        from ytwhisper.pipeline import MediaPipeline
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work_dir = root / "work"
+            cache = CacheStore(root / "cache")
+            cache.store(PREVIOUS_DOCUMENT)
+            cancel_event = threading.Event()
+            dump = json.dump
+
+            def write_and_cancel(*args, **kwargs):
+                dump(*args, **kwargs)
+                cancel_event.set()
+
+            with (
+                patch("ytwhisper.cache.json.dump", side_effect=write_and_cancel),
+                self.assertRaises(CancelledError),
+            ):
+                MediaPipeline(cache, runner=ScriptedRunner(work_dir)).process(
+                    REQUEST, work_dir, lambda state: None, cancel_event,
+                )
+            self.assertEqual(cache.load(VIDEO_ID, 10000, MODEL), PREVIOUS_DOCUMENT)
+            self.assertEqual(list(cache.directory.iterdir()), [cache.path_for(VIDEO_ID)])
+            self.assertFalse(work_dir.exists())
+
+    def test_cache_readers_observe_previous_document_until_atomic_publication(self):
+        # Catches truncating a valid cache before the replacement is fully written.
+        from ytwhisper.pipeline import MediaPipeline
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work_dir = root / "work"
+            cache = CacheStore(root / "cache")
+            cache.store(PREVIOUS_DOCUMENT)
+            replace = os.replace
+            published = []
+
+            def observe_publication(source, destination):
+                self.assertEqual(cache.load(VIDEO_ID, 10000, MODEL), PREVIOUS_DOCUMENT)
+                document = json.loads(Path(source).read_text(encoding="utf-8"))
+                self.assertEqual(document["language"], "zh")
+                self.assertEqual(document["cues"], [
+                    {"startMs": 0, "endMs": 900, "text": "你好。"},
+                    {"startMs": 1100, "endMs": 2400, "text": "世界！"},
+                ])
+                replace(source, destination)
+                published.append(document)
+
+            with patch("ytwhisper.cache.os.replace", side_effect=observe_publication):
+                document = MediaPipeline(cache, runner=ScriptedRunner(work_dir)).process(
+                    REQUEST, work_dir, lambda state: None, threading.Event(),
+                )
+            self.assertEqual(published, [document])
+            self.assertEqual(cache.load(VIDEO_ID, 10000, MODEL), document)
+            self.assertEqual(list(cache.directory.iterdir()), [cache.path_for(VIDEO_ID)])
+            self.assertFalse(work_dir.exists())
+
+    def test_cache_write_failures_preserve_previous_document_and_clean_artifacts(self):
+        # Catches failed publication destroying old subtitles or leaking temporary audio/JSON.
+        from ytwhisper.pipeline import MediaPipeline
+
+        def incomplete_write(document, handle, **options):
+            handle.write('{"schemaVersion":')
+            raise OSError("cache disk failure")
+
+        for target, failure in (("json.dump", incomplete_write),
+                                ("os.replace", OSError("cache disk failure"))):
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                work_dir = root / "work"
+                cache = CacheStore(root / "cache")
+                cache.store(PREVIOUS_DOCUMENT)
+                with (
+                    patch(f"ytwhisper.cache.{target}", side_effect=failure),
+                    self.assertRaisesRegex(OSError, "cache disk failure"),
+                ):
+                    MediaPipeline(cache, runner=ScriptedRunner(work_dir)).process(
+                        REQUEST, work_dir, lambda state: None, threading.Event(),
+                    )
+                self.assertEqual(cache.load(VIDEO_ID, 10000, MODEL), PREVIOUS_DOCUMENT)
+                self.assertEqual(list(cache.directory.iterdir()), [cache.path_for(VIDEO_ID)])
+                self.assertFalse(work_dir.exists())
+
+    def test_cancellation_while_building_cues_does_not_publish_cache(self):
+        # Catches the CPU-only cue step publishing after cancellation was requested.
+        from ytwhisper.cues import make_cues
+        from ytwhisper.pipeline import MediaPipeline
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work_dir = root / "work"
+            cache = CacheStore(root / "cache")
+            cancel_event = threading.Event()
+
+            def make_cues_and_cancel(words):
+                cues = make_cues(words)
+                cancel_event.set()
+                return cues
+
+            with (
+                patch("ytwhisper.pipeline.make_cues", side_effect=make_cues_and_cancel),
+                self.assertRaises(CancelledError),
+            ):
+                MediaPipeline(cache, runner=ScriptedRunner(work_dir)).process(
+                    REQUEST, work_dir, lambda state: None, cancel_event,
+                )
+            self.assertFalse(cache.path_for(VIDEO_ID).exists())
+            self.assertFalse(work_dir.exists())
+
+    def test_invalid_request_does_not_claim_nonempty_file_or_symlink_paths(self):
+        # Catches broad finally cleanup deleting a path the pipeline never owned.
+        from ytwhisper.pipeline import MediaPipeline
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            user_dir = root / "user"
+            user_dir.mkdir()
+            user_file = user_dir / "keep.txt"
+            user_file.write_text("keep me")
+            directory_link = root / "linked-directory"
+            directory_link.symlink_to(user_dir, target_is_directory=True)
+            dangling_link = root / "dangling-link"
+            dangling_link.symlink_to(root / "missing", target_is_directory=True)
+            for work_dir in (user_dir, user_file, directory_link, dangling_link):
+                with self.subTest(work_dir=work_dir):
+                    runner = ScriptedRunner(work_dir)
+                    with self.assertRaises(ValueError):
+                        MediaPipeline(CacheStore(root / "cache"), runner=runner).process(
+                            {**REQUEST, "url": "https://example.com/audio"},
+                            work_dir, lambda state: None, threading.Event(),
+                        )
+                    self.assertEqual(runner.commands, [])
+                    self.assertEqual(user_file.read_text(), "keep me")
+                    self.assertTrue(directory_link.is_symlink())
+                    self.assertTrue(dangling_link.is_symlink())
+
     def test_invalid_request_cleans_owned_directory_without_running_tools(self):
         # Catches bypassing URL normalization or leaking a precreated job directory.
         from ytwhisper.pipeline import MediaPipeline

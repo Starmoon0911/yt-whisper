@@ -1,9 +1,10 @@
 import shutil
 import sys
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event
-from typing import Callable, TypedDict
+from typing import TypedDict
 
 from .cache import CacheStore, SubtitleDocument
 from .cues import make_cues
@@ -28,13 +29,14 @@ class MediaPipeline:
         self, request: PipelineRequest, work_dir: Path, on_state: Callable[[str], None],
         cancel_event: Event,
     ) -> SubtitleDocument:
-        url = normalize_watch_url(request["url"], request["videoId"])
+        """Own a new or empty per-job directory, including on invalid requests."""
         if work_dir.is_symlink() or (
             work_dir.exists() and (not work_dir.is_dir() or any(work_dir.iterdir()))
         ):
             raise ValueError("Work directory must be new or empty")
         work_dir.mkdir(parents=True, exist_ok=True)
         try:
+            url = normalize_watch_url(request["url"], request["videoId"])
             check_cancelled(cancel_event)
             on_state("downloading")
             check_cancelled(cancel_event)
@@ -71,7 +73,8 @@ class MediaPipeline:
                 "generatedAt": datetime.now(timezone.utc).isoformat(),
                 "cues": make_cues(result["words"]),
             }
-            self.cache.store(document)
+            check_cancelled(cancel_event)
+            self.cache.store(document, cancel_event=cancel_event)
             return document
         finally:
             shutil.rmtree(work_dir)

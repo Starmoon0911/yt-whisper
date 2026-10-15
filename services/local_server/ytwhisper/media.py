@@ -1,10 +1,10 @@
-from dataclasses import dataclass
-from concurrent.futures import CancelledError
-from threading import Event
-from typing import Callable
-import subprocess
 import os
 import signal
+import subprocess
+from collections.abc import Callable
+from concurrent.futures import CancelledError
+from dataclasses import dataclass
+from threading import Event
 
 
 class PipelineCancelled(CancelledError):
@@ -37,25 +37,36 @@ class CommandRunner:
             command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             start_new_session=True,
         )
-        while True:
-            if cancel_event.is_set():
-                self._signal_group(process, signal.SIGTERM)
+        try:
+            while True:
+                check_cancelled(cancel_event)
                 try:
-                    process.communicate(timeout=0.25)
+                    stdout, stderr = process.communicate(timeout=0.05)
+                    break
                 except subprocess.TimeoutExpired:
-                    self._signal_group(process, signal.SIGKILL)
-                    process.communicate()
-                raise PipelineCancelled("Subtitle generation canceled")
-            try:
-                stdout, stderr = process.communicate(timeout=0.05)
-                break
-            except subprocess.TimeoutExpired:
-                continue
-        if stdout:
-            on_progress(stdout)
-        if process.returncode:
-            raise CommandError(process.returncode, command, stdout, stderr)
-        return CompletedCommand(command, process.returncode, stdout, stderr)
+                    continue
+            check_cancelled(cancel_event)
+            if stdout:
+                on_progress(stdout)
+            check_cancelled(cancel_event)
+            if process.returncode:
+                raise CommandError(process.returncode, command, stdout, stderr)
+            return CompletedCommand(command, process.returncode, stdout, stderr)
+        except BaseException:
+            self._terminate_group(process)
+            raise
+
+    def _terminate_group(self, process: subprocess.Popen) -> None:
+        self._signal_group(process, signal.SIGTERM)
+        try:
+            process.communicate(timeout=0.25)
+        except subprocess.TimeoutExpired:
+            pass
+        finally:
+            # Descendants may ignore SIGTERM and close their output pipes before
+            # the parent exits. Reaping the parent alone does not stop them.
+            self._signal_group(process, signal.SIGKILL)
+            process.communicate()
 
     @staticmethod
     def _signal_group(process: subprocess.Popen, sig: signal.Signals) -> None:
