@@ -29,6 +29,21 @@ PREVIOUS_DOCUMENT = {
     "model": MODEL, "generatedAt": "2026-10-15T00:00:00Z",
     "cues": [{"startMs": 0, "endMs": 900, "text": "Previous transcript."}],
 }
+_JS_RUNTIME_PATCH = None
+
+
+def setUpModule():
+    # Host toolchains differ; pin the JavaScript runtime yt-dlp would detect.
+    global _JS_RUNTIME_PATCH
+    _JS_RUNTIME_PATCH = patch(
+        "ytwhisper.pipeline.shutil.which",
+        side_effect=lambda name: f"/usr/local/bin/{name}" if name == "deno" else None,
+    )
+    _JS_RUNTIME_PATCH.start()
+
+
+def tearDownModule():
+    _JS_RUNTIME_PATCH.stop()
 
 
 class ScriptedRunner:
@@ -752,10 +767,10 @@ class MediaPipelineTests(unittest.TestCase):
             )
 
             self.assertEqual(runner.commands, [
-                [sys.executable, "-m", "yt_dlp", "--ignore-config", "--no-playlist",
-                 "--no-progress", "--match-filter", "!is_live", "--format", "bestaudio", "--output",
-                 str(work_dir / "source.%(ext)s"), "--print", "after_move:filepath",
-                 f"https://www.youtube.com/watch?v={VIDEO_ID}"],
+                [sys.executable, "-m", "yt_dlp", "--ignore-config", "--js-runtimes", "deno",
+                 "--no-playlist", "--no-progress", "--match-filter", "!is_live", "--format",
+                 "bestaudio", "--output", str(work_dir / "source.%(ext)s"), "--print",
+                 "after_move:filepath", f"https://www.youtube.com/watch?v={VIDEO_ID}"],
                 ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i",
                  str(work_dir / "source.webm"), "-vn", "-ac", "1", "-ar", "16000",
                  "-c:a", "pcm_s16le", str(work_dir / "audio.wav")],
@@ -774,4 +789,46 @@ class MediaPipelineTests(unittest.TestCase):
             self.assertIsNotNone(datetime.fromisoformat(document["generatedAt"]).tzinfo)
             self.assertEqual(cache.load(VIDEO_ID, 10000, MODEL), document)
             self.assertEqual(list(cache.directory.iterdir()), [cache.path_for(VIDEO_ID)])
+            self.assertFalse(work_dir.exists())
+
+    def test_download_enables_the_first_available_js_runtime(self):
+        # Catches yt-dlp degrading YouTube extraction because no JS runtime is enabled.
+        from ytwhisper.pipeline import MediaPipeline
+
+        for available, expected in (
+            (("deno", "node"), "deno"),
+            (("node", "bun"), "node"),
+            (("bun", "quickjs"), "bun"),
+            (("quickjs", "qjs"), "quickjs"),
+            (("qjs",), "qjs"),
+        ):
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                work_dir = root / "work"
+                runner = ScriptedRunner(work_dir)
+                with patch("ytwhisper.pipeline.shutil.which",
+                           side_effect=lambda name, available=available:
+                           name if name in available else None):
+                    MediaPipeline(CacheStore(root / "cache"), runner=runner).process(
+                        REQUEST, work_dir, lambda state: None, threading.Event(),
+                    )
+                command = runner.commands[0]
+                self.assertEqual(command[command.index("--js-runtimes") + 1], expected)
+
+    def test_download_without_a_js_runtime_fails_before_yt_dlp_runs(self):
+        # Catches running yt-dlp in the deprecated no-runtime extraction mode.
+        from ytwhisper.pipeline import MediaPipeline, MissingJsRuntime
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work_dir = root / "work"
+            runner = ScriptedRunner(work_dir)
+            with (
+                patch("ytwhisper.pipeline.shutil.which", return_value=None),
+                self.assertRaises(MissingJsRuntime),
+            ):
+                MediaPipeline(CacheStore(root / "cache"), runner=runner).process(
+                    REQUEST, work_dir, lambda state: None, threading.Event(),
+                )
+            self.assertEqual(runner.commands, [])
             self.assertFalse(work_dir.exists())

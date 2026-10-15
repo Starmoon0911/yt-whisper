@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from .cache import CacheStore
 from .models import ApiError, JobRequest, JobSnapshot
-from .pipeline import MediaPipeline
+from .pipeline import MediaPipeline, MissingJsRuntime
 from .transcriber import MODEL
 
 _TERMINAL = {"completed", "failed", "canceled"}
@@ -145,6 +145,13 @@ class JobManager:
 
 
 def _pipeline_error(error: Exception, stage: str) -> ApiError:
+    if isinstance(error, MissingJsRuntime):
+        return ApiError(
+            code="JS_RUNTIME_MISSING",
+            message="Install Deno or Node.js to download YouTube audio, then restart the local "
+                    "service.",
+            retryable=False,
+        )
     if isinstance(error, FileNotFoundError) and stage == "converting":
         return ApiError(code="FFMPEG_NOT_FOUND", message="Install ffmpeg and restart the service.",
                         retryable=False)

@@ -6,6 +6,7 @@ from concurrent.futures import CancelledError
 
 import pytest
 from ytwhisper.cache import CacheStore
+from ytwhisper.pipeline import MissingJsRuntime
 
 VIDEO_ID = "dQw4w9WgXcQ"
 OTHER_ID = "abcdefghijk"
@@ -262,6 +263,7 @@ def test_simultaneous_create_requests_share_one_job(setup_jobs):
     ("converting", FileNotFoundError("ffmpeg"), "FFMPEG_NOT_FOUND", False),
     ("converting", RuntimeError("tool failed"), "CONVERSION_FAILED", True),
     ("transcribing", RuntimeError("model failed"), "TRANSCRIPTION_FAILED", True),
+    ("downloading", MissingJsRuntime("no runtime"), "JS_RUNTIME_MISSING", False),
 ])
 def test_external_failures_keep_stage_specific_error_codes(setup_jobs, stage, error, code, retryable):
     manager, pipeline, cache = setup_jobs(fail=error, failure_stage=stage)
