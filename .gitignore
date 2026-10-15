@@ -13,6 +13,7 @@ dist/
 coverage/
 .wxt/
 .worktrees/
+/docs/
 
 # Local ytWhisper runtime data when --data-dir points inside the repository.
 ytwhisper-data/
