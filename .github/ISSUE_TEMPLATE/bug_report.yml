@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a reproducible problem with ytWhisper.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve ytWhisper. Remove tokens, pairing data, and local paths from all logs.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem
+      description: Describe what happened and what you expected instead.
+      placeholder: A clear, concise description of the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include the smallest reliable sequence that reproduces the problem.
+      placeholder: |
+        1. Start the service with ...
+        2. Open a public YouTube watch page ...
+        3. Click ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include macOS, Mac model/chip, Chrome, Python, and ytWhisper revision.
+      placeholder: macOS 15, Apple M2, Chrome 140, Python 3.13, commit abc1234
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Add relevant output after removing tokens, pairing data, video details, and local paths.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for duplicates.
+          required: true
+        - label: I removed secrets and personal information from this report.
+          required: true
