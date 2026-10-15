@@ -1,0 +1,40 @@
+[project]
+name = "ytwhisper"
+version = "0.1.0"
+description = "Local Whisper subtitles for public YouTube videos"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
+  "mlx-whisper>=0.4,<1",
+  "pydantic>=2.10,<3",
+  "uvicorn>=0.34,<1",
+  "yt-dlp>=2025.1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.25,<1",
+  "ruff>=0.9,<1",
+]
+
+[project.scripts]
+ytwhisper = "ytwhisper.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["services/local_server/ytwhisper"]
+
+[tool.pytest.ini_options]
+testpaths = ["services/local_server/tests"]
+pythonpath = ["services/local_server"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+

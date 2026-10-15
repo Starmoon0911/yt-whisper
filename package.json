@@ -1,0 +1,11 @@
+{
+  "name": "ytwhisper-workspace",
+  "private": true,
+  "packageManager": "pnpm@12.11.2",
+  "scripts": {
+    "build": "pnpm --dir apps/extension build",
+    "test": "pnpm --dir apps/extension test",
+    "typecheck": "pnpm --dir apps/extension typecheck"
+  }
+}
+
