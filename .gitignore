@@ -1,4 +1,8 @@
 .DS_Store
+.env
+.env.*
+!.env.example
+*.log
 .venv/
 __pycache__/
 .pytest_cache/
@@ -9,4 +13,7 @@ dist/
 coverage/
 .wxt/
 .worktrees/
+
+# Local ytWhisper runtime data when --data-dir points inside the repository.
+ytwhisper-data/
 
