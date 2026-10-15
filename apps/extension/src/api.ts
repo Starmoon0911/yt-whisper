@@ -52,7 +52,7 @@ export class LocalApiClient {
     }
     let response: Response;
     try {
-      response = await this.fetcher(`http://127.0.0.1:8765/v1${path}`, {
+      response = await this.fetcher.call(globalThis, `http://127.0.0.1:8765/v1${path}`, {
         method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         credentials: "omit", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(10000),
       });

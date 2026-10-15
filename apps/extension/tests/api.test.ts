@@ -23,6 +23,20 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 const request = { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", videoId: "dQw4w9WgXcQ", durationMs: 10000 };
 
 describe("localhost API boundary", () => {
+  it("calls fetch with the WorkerGlobalScope receiver", async () => {
+    const storage = {
+      async get() { return {}; },
+      async set() {},
+      async remove() {},
+    };
+    const fetcher = function (this: typeof globalThis) {
+      if (this !== globalThis) throw new TypeError("Illegal invocation");
+      return Promise.resolve(json({ status: "ok", pairingRequired: true, ffmpegAvailable: true, model: "whisper" }));
+    };
+
+    await expect(new LocalApiClient(storage, fetcher).health()).resolves.toMatchObject({ status: "ok" });
+  });
+
   it.each(invalidDocuments)("rejects completed $name before exposing a terminal job", async ({ value }) => {
     const completed = { jobId: "job-1", videoId: request.videoId, status: "completed", stage: "completed", progress: 1, error: null, result: value };
     await expect(harness([json(completed)], "secret").api.getJob("job-1")).rejects.toMatchObject({ code: "INVALID_RESPONSE", retryable: true });
