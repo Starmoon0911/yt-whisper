@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiFailure, LocalApiClient } from "../src/api";
+import { documentFixture, invalidDocuments } from "./documents";
 
 function harness(responses: (Response | Error)[], token?: string) {
   const calls: { url: string; init: RequestInit }[] = [];
@@ -22,6 +23,30 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 const request = { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", videoId: "dQw4w9WgXcQ", durationMs: 10000 };
 
 describe("localhost API boundary", () => {
+  it.each(invalidDocuments)("rejects completed $name before exposing a terminal job", async ({ value }) => {
+    const completed = { jobId: "job-1", videoId: request.videoId, status: "completed", stage: "completed", progress: 1, error: null, result: value };
+    await expect(harness([json(completed)], "secret").api.getJob("job-1")).rejects.toMatchObject({ code: "INVALID_RESPONSE", retryable: true });
+  });
+
+  it("uses Origin-bearing POST reads with bearer auth only for job status", async () => {
+    const job = { jobId: "job-1", videoId: request.videoId, status: "transcribing", stage: "transcribing", progress: null, error: null, result: null };
+    const { api, calls } = harness([
+      json({ status: "ok", pairingRequired: false, ffmpegAvailable: true, model: "whisper" }), json(job),
+    ], "secret");
+    await api.health();
+    expect(await api.getJob("job-1")).toEqual(job);
+    expect(calls.map(({ url, init }) => [url, init.method])).toEqual([
+      ["http://127.0.0.1:8765/v1/health", "POST"],
+      ["http://127.0.0.1:8765/v1/jobs/job-1", "POST"],
+    ]);
+    expect(calls[0].init.headers).not.toHaveProperty("Authorization");
+    expect(calls[1].init.headers).toMatchObject({ Authorization: "Bearer secret" });
+    for (const { init } of calls) {
+      expect(init.headers).not.toHaveProperty("Origin"); // Browser owns this forbidden header.
+      expect(init).toMatchObject({ credentials: "omit", redirect: "error", cache: "no-store" });
+    }
+  });
+
   it("reports an offline service as a retryable failure", async () => {
     const { api } = harness([new TypeError("Failed to fetch")]);
     await expect(api.health()).rejects.toMatchObject({ code: "SERVICE_OFFLINE", retryable: true });
@@ -68,7 +93,7 @@ describe("localhost API boundary", () => {
   });
 
   it("reads cache-hit job snapshots and uses DELETE for cancellation", async () => {
-    const snapshot = { jobId: "job/1", videoId: request.videoId, status: "completed", stage: "completed", progress: 1, error: null, result: null };
+    const snapshot = { jobId: "job/1", videoId: request.videoId, status: "completed", stage: "completed", progress: 1, error: null, result: documentFixture() };
     const { api, calls } = harness([json({ jobId: "job/1", cacheHit: true }), json(snapshot), json({ ...snapshot, status: "canceled" })], "secret");
     expect(await api.createJob(request)).toEqual({ jobId: "job/1", cacheHit: true });
     expect(await api.getJob("job/1")).toEqual(snapshot);

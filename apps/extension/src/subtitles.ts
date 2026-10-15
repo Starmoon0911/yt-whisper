@@ -14,6 +14,25 @@ export interface SubtitleDocument {
   cues: SubtitleCue[];
 }
 
+export function validDocument(value: unknown, videoId: string): value is SubtitleDocument {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const data = value as Record<string, unknown>;
+  if (data.schemaVersion !== 1 || data.videoId !== videoId || !/^[A-Za-z0-9_-]{11}$/.test(videoId)
+    || !Number.isSafeInteger(data.durationMs) || (data.durationMs as number) <= 0
+    || data.model !== "mlx-community/whisper-large-v3-turbo"
+    || typeof data.language !== "string" || !data.language.trim()
+    || typeof data.generatedAt !== "string" || !data.generatedAt.trim() || !Array.isArray(data.cues)) return false;
+  let previousEnd = 0;
+  for (const cue of data.cues) {
+    if (!cue || typeof cue !== "object" || Array.isArray(cue)
+      || !Number.isSafeInteger(cue.startMs) || !Number.isSafeInteger(cue.endMs) || cue.startMs < previousEnd
+      || cue.endMs <= cue.startMs || cue.endMs > (data.durationMs as number)
+      || typeof cue.text !== "string" || !cue.text.trim()) return false;
+    previousEnd = cue.endMs;
+  }
+  return true;
+}
+
 export function extractVideoId(url: string): string | null {
   let parsed: URL;
   try {

@@ -1,17 +1,5 @@
 import { isActiveJob, type JobSnapshot } from "./contracts";
-import { cueAtTime, type SubtitleDocument } from "./subtitles";
-
-function validDocument(value: SubtitleDocument, videoId: string): boolean {
-  if (!value || value.schemaVersion !== 1 || value.videoId !== videoId || !Number.isSafeInteger(value.durationMs) || value.durationMs <= 0
-    || typeof value.language !== "string" || typeof value.model !== "string" || typeof value.generatedAt !== "string" || !Array.isArray(value.cues)) return false;
-  let previousEnd = 0;
-  for (const cue of value.cues) {
-    if (!cue || !Number.isSafeInteger(cue.startMs) || !Number.isSafeInteger(cue.endMs) || cue.startMs < previousEnd
-      || cue.endMs <= cue.startMs || cue.endMs > value.durationMs || typeof cue.text !== "string") return false;
-    previousEnd = cue.endMs;
-  }
-  return true;
-}
+import { cueAtTime, validDocument, type SubtitleDocument } from "./subtitles";
 
 export class SubtitleOverlay {
   private root: HTMLDivElement;

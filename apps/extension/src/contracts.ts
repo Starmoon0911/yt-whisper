@@ -28,6 +28,8 @@ export type BackgroundResponse = { ok: true; state: PopupState } | { ok: false; 
 // Service worker -> content via tabs.sendMessage only; never runtime.sendMessage.
 // START_JOB acknowledges only after pausing the matching video. Reject a stale videoId.
 // SET_PROGRESS terminals restore/clear processing UI; completed SET_SUBTITLES loads and plays from 0.
+// Same-video progress/results may be acknowledged before metadata is ready;
+// content retains them and applies playback on recovery. A null page is not navigation.
 export type ContentRequest =
   | { type: "GET_PAGE_STATE" }
   | { type: "START_JOB"; videoId: string }

@@ -1,0 +1,20 @@
+{
+  "language": "en",
+  "text": " Well, this is a test.",
+  "segments": [
+    {
+      "id": 0,
+      "start": 0.0,
+      "end": 1.4,
+      "text": " Well, this is a test.",
+      "words": [
+        {"word": " Well,", "start": 0.0, "end": 0.0, "probability": 0.91},
+        {"word": " this", "start": 0.0, "end": 0.4, "probability": 0.98},
+        {"word": " is", "start": 0.4, "end": 0.4, "probability": 0.88},
+        {"word": " a", "start": 0.4, "end": 0.8, "probability": 0.99},
+        {"word": " test", "start": 0.8, "end": 1.4, "probability": 0.99},
+        {"word": ".", "start": 1.4, "end": 1.4, "probability": 0.99}
+      ]
+    }
+  ]
+}

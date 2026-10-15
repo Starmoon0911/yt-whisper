@@ -1,5 +1,6 @@
 // This module is imported at runtime by background.ts only.
 import type { ApiError, Health, JobCreated, JobRequest, JobSnapshot } from "./contracts";
+import { validDocument } from "./subtitles";
 
 export interface TokenStorage {
   get(key: string): Promise<Record<string, unknown>>;
@@ -23,13 +24,14 @@ function validSuccess(path: string, value: unknown): boolean {
   return typeof data.jobId === "string" && typeof data.videoId === "string" && statuses.includes(data.status as string) && statuses.includes(data.stage as string)
     && (data.progress === null || typeof data.progress === "number" && Number.isFinite(data.progress))
     && (data.error === null || !!data.error && typeof data.error === "object" && typeof (data.error as ApiError).code === "string" && typeof (data.error as ApiError).message === "string" && typeof (data.error as ApiError).retryable === "boolean")
-    && (data.result === null || !!data.result && typeof data.result === "object");
+    && (data.result === null ? data.status !== "completed" : validDocument(data.result, data.videoId as string));
 }
 
 export class LocalApiClient {
   constructor(private storage: TokenStorage, private fetcher: (url: string, init: RequestInit) => Promise<Response> = fetch) {}
   async isPaired(): Promise<boolean> { return typeof (await this.storage.get("token")).token === "string"; }
-  health(): Promise<Health> { return this.request("/health", "GET", false); }
+  // POST ensures browser-generated Origin even for host-permitted extension reads.
+  health(): Promise<Health> { return this.request("/health", "POST", false); }
   async pair(code: string): Promise<void> {
     if (!/^[0-9]{6}$/.test(code)) throw new ApiFailure("PAIRING_FAILED", "請輸入六位數配對碼。", false);
     const data = await this.request<{ token: string }>("/pair", "POST", false, { code });
@@ -37,7 +39,7 @@ export class LocalApiClient {
     await this.storage.set({ token: data.token });
   }
   createJob(request: JobRequest): Promise<JobCreated> { return this.request("/jobs", "POST", true, request); }
-  getJob(jobId: string): Promise<JobSnapshot> { return this.request(`/jobs/${encodeURIComponent(jobId)}`, "GET", true); }
+  getJob(jobId: string): Promise<JobSnapshot> { return this.request(`/jobs/${encodeURIComponent(jobId)}`, "POST", true); }
   cancelJob(jobId: string): Promise<JobSnapshot> { return this.request(`/jobs/${encodeURIComponent(jobId)}`, "DELETE", true); }
 
   private async request<T>(path: string, method: string, protectedRoute: boolean, body?: unknown): Promise<T> {

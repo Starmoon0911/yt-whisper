@@ -75,6 +75,26 @@ def test_health_pairing_and_authenticated_cache_job_lifecycle(tmp_path):
         assert_error(client.post("/v1/pair", json={"code": "123456"}), 400, "PAIRING_FAILED")
 
 
+def test_post_reads_match_get_without_mutating_jobs_and_allow_cache_without_ffmpeg(tmp_path):
+    # Chrome host-permitted GET fetches can omit Origin; POST reads keep strict Origin.
+    with client_for(tmp_path) as (client, _, _):
+        with patch("ytwhisper.api.shutil.which", return_value=None):
+            health = client.post("/v1/health")
+            assert health.status_code == 200
+            assert health.json() == client.get("/v1/health").json()
+            assert health.json()["ffmpegAvailable"] is False
+            assert health.headers["Access-Control-Allow-Origin"] == ORIGIN
+            authorize(client)
+            created = client.post("/v1/jobs", json=REQUEST).json()
+            assert created["cacheHit"] is True
+            route = f'/v1/jobs/{created["jobId"]}'
+            snapshot = client.post(route)
+            assert snapshot.status_code == 200
+            assert snapshot.json() == client.get(route).json()
+            assert snapshot.json()["result"] == DOCUMENT
+            assert_error(client.post("/v1/jobs/unknown"), 404, "JOB_NOT_FOUND")
+
+
 @pytest.mark.parametrize("origin", [None, "null", "https://www.youtube.com", ORIGIN + ".evil",
                                     "chrome-extension://" + "b" * 32])
 def test_every_route_rejects_missing_or_unapproved_origin(tmp_path, origin):
@@ -83,8 +103,9 @@ def test_every_route_rejects_missing_or_unapproved_origin(tmp_path, origin):
             del client.headers["Origin"]
         else:
             client.headers["Origin"] = origin
-        for method, route in (("get", "/v1/health"), ("post", "/v1/pair"),
+        for method, route in (("get", "/v1/health"), ("post", "/v1/health"), ("post", "/v1/pair"),
                               ("post", "/v1/jobs"), ("get", "/v1/jobs/unknown"),
+                              ("post", "/v1/jobs/unknown"),
                               ("delete", "/v1/jobs/unknown")):
             assert_error(getattr(client, method)(route), 403, "ORIGIN_FORBIDDEN")
 
@@ -99,6 +120,7 @@ def test_job_routes_require_valid_bearer(tmp_path, header):
             client.headers["Authorization"] = header
         assert_error(client.post("/v1/jobs", json=REQUEST), 401, "UNAUTHORIZED")
         assert_error(client.get("/v1/jobs/unknown"), 401, "UNAUTHORIZED")
+        assert_error(client.post("/v1/jobs/unknown"), 401, "UNAUTHORIZED")
         assert_error(client.delete("/v1/jobs/unknown"), 401, "UNAUTHORIZED")
 
 

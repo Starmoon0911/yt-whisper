@@ -42,17 +42,19 @@
 
 ## API 契約
 
-- `GET /v1/health`
+- `GET /v1/health`、`POST /v1/health`
   - 回傳服務狀態、是否需要配對、ffmpeg 是否可用、模型名稱。
 - `POST /v1/pair`
   - 輸入 `{ "code": "123456" }`，成功回傳 bearer token。
 - `POST /v1/jobs`
   - 輸入 `{ "url", "videoId", "durationMs", "force"? }`。
   - 回傳 `{ "jobId", "cacheHit" }`。
-- `GET /v1/jobs/{id}`
+- `GET /v1/jobs/{id}`、`POST /v1/jobs/{id}`
   - 回傳狀態、階段、可取得的進度、錯誤或完成字幕。
 - `DELETE /v1/jobs/{id}`
   - 將工作標記為取消，終止目前子行程並清理暫存檔。
+
+GET 查詢保留相容性；擴充套件使用無 body 的 POST 查詢別名，確保瀏覽器會產生 Origin，即使 host permission 使請求免除 CORS。兩種查詢方法共用相同讀取邏輯，均須通過嚴格的 extension Origin 驗證，工作查詢另需 bearer token；不接受缺少 Origin 的請求。
 
 工作狀態為 `queued | downloading | converting | transcribing | completed | failed | canceled`。錯誤格式為 `{ "code", "message", "retryable" }`。
 

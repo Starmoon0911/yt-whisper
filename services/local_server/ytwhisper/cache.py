@@ -48,7 +48,10 @@ class CacheStore:
             return None
         if document.get("videoId") != video_id or document.get("model") != model:
             return None
-        if type(document.get("durationMs")) is not int:
+        if (
+            type(document.get("durationMs")) is not int
+            or not 0 < document["durationMs"] <= 2**53 - 1
+        ):
             return None
         if abs(document["durationMs"] - duration_ms) > 2000:
             return None
@@ -66,7 +69,7 @@ class CacheStore:
             start, end, text = cue.get("startMs"), cue.get("endMs"), cue.get("text")
             if type(start) is not int or type(end) is not int:
                 return None
-            if start < previous_end or end <= start:
+            if start < previous_end or end <= start or end > document["durationMs"]:
                 return None
             if not isinstance(text, str) or not text.strip():
                 return None

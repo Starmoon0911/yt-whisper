@@ -1,7 +1,7 @@
 import { isActiveJob, type ContentRequest, type ContentResponse, type JobSnapshot, type PageChanged, type PageState } from "./contracts";
 import { SubtitleOverlay } from "./overlay";
 import { PlayerController } from "./player";
-import { extractVideoId, type SubtitleDocument } from "./subtitles";
+import { extractVideoId, validDocument, type SubtitleDocument } from "./subtitles";
 
 const commandTypes = ["GET_PAGE_STATE", "START_JOB", "SET_PROGRESS", "SET_SUBTITLES"];
 const statuses = ["queued", "downloading", "converting", "transcribing", "completed", "failed", "canceled"];
@@ -25,6 +25,7 @@ class ContentController {
   private videoId: string | null | undefined;
   private subtitles: SubtitleDocument | null = null;
   private progress: JobSnapshot | null = null;
+  private pendingPlayback = false;
   private enabled = true;
   private observer: MutationObserver;
   private disposed = false;
@@ -45,16 +46,15 @@ class ContentController {
     if (value.type === "GET_PAGE_STATE") return { ok: true, page: this.page() };
     if (typeof value.videoId !== "string") return failure("INVALID_MESSAGE", "訊息缺少影片識別碼。", false);
     if (value.videoId !== this.videoId) return failure("VIDEO_CHANGED", "影片已切換，請在目前影片重新操作。");
-    if (!this.player.snapshot() || !this.overlay) return failure("NO_VIDEO", "請等待一般 YouTube 影片載入；不支援直播。", false);
-
     if (value.type === "START_JOB") {
+      if (!this.player.snapshot() || !this.overlay) return failure("NO_VIDEO", "請等待一般 YouTube 影片載入；不支援直播。", false);
       this.player.pauseForProcessing();
       this.progress = { jobId: "", videoId: value.videoId, status: "queued", stage: "queued", progress: null, error: null, result: null };
       this.overlay.setProgress(this.progress);
     } else if (value.type === "SET_PROGRESS") {
       if (!validSnapshot(value.snapshot) || value.snapshot.videoId !== this.videoId) return failure("INVALID_MESSAGE", "工作與目前影片不相符。", false);
       this.progress = value.snapshot;
-      this.overlay.setProgress(this.progress);
+      this.overlay?.setProgress(this.progress);
       if (this.progress.status === "failed" || this.progress.status === "canceled") {
         // An autoplay restriction must not replace the original job failure.
         await this.player.restoreAfterProcessing().catch(() => {});
@@ -62,18 +62,19 @@ class ContentController {
     } else if (value.type === "SET_SUBTITLES") {
       if (typeof value.enabled !== "boolean") return failure("INVALID_MESSAGE", "無效的字幕開關。", false);
       if (value.document !== undefined) {
-        if (!record(value.document) || !this.overlay.setDocument(value.document as unknown as SubtitleDocument)) {
+        if (!validDocument(value.document, value.videoId)) {
           return failure("INVALID_SUBTITLES", "字幕文件無效或與目前影片不相符。", false);
         }
-        this.subtitles = value.document as unknown as SubtitleDocument;
+        this.subtitles = value.document;
+        this.overlay?.setDocument(this.subtitles);
         this.progress = null;
+        this.pendingPlayback = true;
       }
       this.enabled = value.enabled;
-      this.overlay.setEnabled(this.enabled);
+      this.overlay?.setEnabled(this.enabled);
       if (value.document !== undefined) {
-        try { await this.player.playFromStart(); }
+        try { await this.playPendingSubtitles(); }
         catch { return failure("PLAYBACK_BLOCKED", "字幕已載入，請按影片播放鍵開始播放。"); }
-        finally { this.overlay?.setEnabled(this.enabled); }
       }
     }
     return { ok: true, page: this.page() };
@@ -93,12 +94,19 @@ class ContentController {
     return state ? { url: state.url, videoId: state.videoId, title: state.title, durationMs: state.durationMs, subtitlesEnabled: this.enabled, hasSubtitles: this.subtitles !== null } : null;
   }
 
+  private async playPendingSubtitles(): Promise<void> {
+    if (!this.pendingPlayback || !this.player.snapshot() || !this.overlay) return;
+    this.pendingPlayback = false;
+    try { await this.player.playFromStart(); }
+    finally { this.overlay?.setEnabled(this.enabled); }
+  }
+
   private refresh = (): void => {
     if (this.disposed) return;
     const videoId = extractVideoId(this.document.location.href);
     if (videoId !== this.videoId) {
       this.overlay?.destroy(); this.overlay = null; this.boundVideo = null; this.boundContainer = null;
-      this.videoId = videoId; this.subtitles = null; this.progress = null; this.enabled = true;
+      this.videoId = videoId; this.subtitles = null; this.progress = null; this.enabled = true; this.pendingPlayback = false;
       this.player.forgetProcessing();
       // This is the only content -> worker message. Worker commands stay local.
       void this.notify({ type: "PAGE_CHANGED", videoId }).catch(() => {});
@@ -118,7 +126,11 @@ class ContentController {
       if (this.progress) {
         if (isActiveJob(this.progress)) this.player.pauseForProcessing();
         this.overlay.setProgress(this.progress);
+        if (this.progress.status === "failed" || this.progress.status === "canceled") {
+          void this.player.restoreAfterProcessing().catch(() => {});
+        }
       }
+      void this.playPendingSubtitles().catch(() => {});
     }
   };
 }

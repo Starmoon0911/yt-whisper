@@ -25,9 +25,9 @@ export function mountPopup(root: Document, send: Messenger, refreshMs = 1000): (
     progress.hidden = !active;
     if (typeof state?.job?.progress === "number") progress.value = Math.min(1, Math.max(0, state.job.progress));
     else progress.removeAttribute("value");
-    const canStart = online && state?.paired && state.health?.ffmpegAvailable && usable && !active && !busy;
+    const canStart = online && state?.paired && usable && !active && !busy;
     get<HTMLButtonElement>("start").disabled = !canStart;
-    get<HTMLButtonElement>("regenerate").disabled = !canStart;
+    get<HTMLButtonElement>("regenerate").disabled = !canStart || !state?.health?.ffmpegAvailable;
     get<HTMLButtonElement>("cancel").hidden = !active;
     get<HTMLButtonElement>("cancel").disabled = busy;
     get<HTMLButtonElement>("refresh").disabled = busy;
@@ -35,7 +35,7 @@ export function mountPopup(root: Document, send: Messenger, refreshMs = 1000): (
     get<HTMLInputElement>("subtitles").checked = state?.page?.subtitlesEnabled ?? true;
     const error = actionError ?? state?.error;
     get("error").hidden = !error && !(online && !state?.health?.ffmpegAvailable);
-    get("error").textContent = error ? `${error.message}${error.retryable ? "（可重試）" : ""}` : online && !state?.health?.ffmpegAvailable ? "找不到 ffmpeg，請安裝後重新啟動本機服務。" : "";
+    get("error").textContent = error ? `${error.message}${error.retryable ? "（可重試）" : ""}` : online && !state?.health?.ffmpegAvailable ? "找不到 ffmpeg，仍可載入已有快取；產生新字幕前請安裝並重新啟動本機服務。" : "";
   }
   async function run(message: BackgroundRequest) {
     if (busy || disposed) return;

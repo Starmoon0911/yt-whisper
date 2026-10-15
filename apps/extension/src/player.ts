@@ -47,6 +47,7 @@ export class PlayerController {
 
   async restoreAfterProcessing(): Promise<void> {
     const saved = this.saved;
+    if (saved && saved.video === this.video && saved.state.videoId === extractVideoId(this.document.location.href) && !this.snapshot()) return;
     this.saved = null;
     if (saved && saved.video === this.video && saved.state.videoId === this.snapshot()?.videoId && !saved.state.paused) {
       await saved.video.play();

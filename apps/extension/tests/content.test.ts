@@ -6,7 +6,7 @@ import type { SubtitleDocument } from "../src/subtitles";
 import { mediaFixture, otherVideoId, resetPage, videoId } from "./media";
 
 type Listener = (message: unknown, sender: chrome.runtime.MessageSender, reply: (response: ContentResponse) => void) => boolean;
-const subtitles = (): SubtitleDocument => ({ schemaVersion: 1, videoId, language: "en", durationMs: 10000, model: "whisper", generatedAt: "2026-10-15T00:00:00Z", cues: [{ startMs: 0, endMs: 1000, text: "Hello" }, { startMs: 4000, endMs: 5000, text: "Later" }] });
+const subtitles = (): SubtitleDocument => ({ schemaVersion: 1, videoId, language: "en", durationMs: 10000, model: "mlx-community/whisper-large-v3-turbo", generatedAt: "2026-10-15T00:00:00Z", cues: [{ startMs: 0, endMs: 1000, text: "Hello" }, { startMs: 4000, endMs: 5000, text: "Later" }] });
 const progress = (status: JobSnapshot["status"]): JobSnapshot => ({ jobId: "", videoId, status, stage: status, progress: null, error: status === "failed" ? { code: "DOWNLOAD_FAILED", message: "下載失敗", retryable: true } : null, result: null });
 let stops: (() => void)[];
 let frames: Set<number>;
@@ -110,6 +110,56 @@ describe("content message boundary", () => {
 });
 
 describe("YouTube SPA lifecycle", () => {
+  it.each(["failed", "canceled"] as const)("accepts %s during metadata loss and restores playback when metadata returns", async status => {
+    const { video } = mediaFixture(); const h = harness();
+    await h.send({ type: "START_JOB", videoId });
+    Object.defineProperty(video, "duration", { configurable: true, value: NaN });
+    video.dispatchEvent(new Event("emptied"));
+    expect(await h.send({ type: "SET_PROGRESS", videoId, snapshot: progress(status) })).toEqual({ ok: true, page: null });
+    expect(video.paused).toBe(true);
+    Object.defineProperty(video, "duration", { value: 10 });
+    video.dispatchEvent(new Event("loadedmetadata"));
+    await vi.waitFor(() => expect(video.paused).toBe(false));
+    expect(video.currentTime).toBe(4.25);
+    expect(video.playbackRate).toBe(1.5);
+    expect(document.querySelector<HTMLElement>(".ytwhisper-status")?.hidden).toBe(status === "canceled");
+    expect(h.sent).toEqual([{ type: "PAGE_CHANGED", videoId }]);
+  });
+
+  it("accepts completed subtitles during metadata loss and plays from zero after recovery", async () => {
+    const { video } = mediaFixture(); const h = harness();
+    await h.send({ type: "START_JOB", videoId });
+    Object.defineProperty(video, "duration", { configurable: true, value: NaN });
+    video.dispatchEvent(new Event("emptied"));
+    expect(await h.send({ type: "SET_PROGRESS", videoId, snapshot: progress("completed") })).toEqual({ ok: true, page: null });
+    expect(await h.send({ type: "SET_SUBTITLES", videoId, enabled: true, document: subtitles() })).toEqual({ ok: true, page: null });
+    expect(video.currentTime).toBe(4.25);
+    expect(video.paused).toBe(true);
+    Object.defineProperty(video, "duration", { value: 10 });
+    video.dispatchEvent(new Event("loadedmetadata"));
+    await vi.waitFor(() => expect(video.paused).toBe(false));
+    expect(video.currentTime).toBe(0);
+    expect(document.querySelector(".ytwhisper-caption")?.textContent).toBe("Hello");
+    video.currentTime = 4.5;
+    video.dispatchEvent(new Event("durationchange"));
+    expect(video.currentTime).toBe(4.5); // Deferred playback is consumed only once.
+  });
+
+  it("discards deferred playback when a different video is confirmed before metadata returns", async () => {
+    const { video } = mediaFixture(); const h = harness();
+    await h.send({ type: "START_JOB", videoId });
+    Object.defineProperty(video, "duration", { configurable: true, value: NaN });
+    expect(await h.send({ type: "SET_SUBTITLES", videoId, enabled: true, document: subtitles() })).toEqual({ ok: true, page: null });
+    history.replaceState(null, "", `/watch?v=${otherVideoId}`);
+    document.dispatchEvent(new Event("yt-navigate-finish"));
+    Object.defineProperty(video, "duration", { value: 10 });
+    video.dispatchEvent(new Event("loadedmetadata"));
+    await Promise.resolve();
+    expect(video.paused).toBe(true);
+    expect(video.currentTime).toBe(4.25);
+    expect(document.querySelector(".ytwhisper-caption")?.textContent).toBe("");
+  });
+
   it("clears cues, progress and animation on navigation without starting another job", async () => {
     const { video } = mediaFixture(); const h = harness();
     await h.send({ type: "SET_SUBTITLES", videoId, enabled: true, document: subtitles() });

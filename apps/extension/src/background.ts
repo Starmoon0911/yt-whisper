@@ -1,9 +1,9 @@
 import { ApiFailure, errorDetails, LocalApiClient } from "./api";
-import { isActiveJob, type BackgroundRequest, type BackgroundResponse, type ContentRequest, type ContentResponse, type Health, type JobSnapshot, type PageState, type PopupState } from "./contracts";
+import { isActiveJob, type ApiError, type BackgroundRequest, type BackgroundResponse, type ContentRequest, type ContentResponse, type Health, type JobSnapshot, type PageState, type PopupState } from "./contracts";
 import { extractVideoId } from "./subtitles";
 
 interface JobRef { tabId: number; videoId: string; jobId: string; cacheHit: boolean }
-interface TrackedJob extends JobRef { snapshot: JobSnapshot | null; stop?: () => void; version: number }
+interface TrackedJob extends JobRef { snapshot: JobSnapshot | null; stop?: () => void; version: number; error?: ApiError; pendingDelivery?: boolean }
 interface BackgroundHost {
   activeTab(): Promise<number | null>;
   sendToTab(tabId: number, message: ContentRequest): Promise<ContentResponse>;
@@ -34,7 +34,7 @@ export class BackgroundController {
             const snapshot = await this.api.cancelJob(job.jobId);
             if (this.jobs.get(job.tabId) === job) await this.deliver(job, snapshot);
           } catch (error) {
-            if (this.jobs.get(job.tabId) === job) job.stop = this.host.schedule(() => this.poll(job));
+            if (this.jobs.get(job.tabId) === job) this.schedule(job);
             throw error;
           }
         }
@@ -67,14 +67,16 @@ export class BackgroundController {
   private async state(tabId?: number | null): Promise<PopupState> {
     const selectedTab = tabId === undefined ? await this.host.activeTab() : tabId;
     const page = await this.page(selectedTab);
-    if (selectedTab !== null) await this.pageChanged(selectedTab, page?.videoId ?? null);
+    // Null means metadata or the content script is unavailable, not navigation.
+    // PAGE_CHANGED and tab removal carry confirmed identity changes separately.
+    if (selectedTab !== null && page) await this.pageChanged(selectedTab, page.videoId);
     let health: Health | null = null;
     let error = null;
     try { health = await this.api.health(); } catch (failure) { error = errorDetails(failure); }
     const job = selectedTab === null ? undefined : this.jobs.get(selectedTab);
     return {
       tabId: selectedTab, page, health, paired: await this.api.isPaired() && health?.pairingRequired !== true,
-      job: job?.snapshot ?? null, cacheHit: job?.cacheHit ?? false, error: error ?? job?.snapshot?.error ?? null,
+      job: job?.snapshot ?? null, cacheHit: job?.cacheHit ?? false, error: error ?? job?.error ?? job?.snapshot?.error ?? null,
     };
   }
   private async start(tabId: number, force: boolean): Promise<void> {
@@ -108,29 +110,59 @@ export class BackgroundController {
     if (this.jobs.get(job.tabId) !== job) return;
     const version = job.version;
     try {
-      const snapshot = await this.api.getJob(job.jobId);
+      const snapshot = job.pendingDelivery && job.snapshot && !isActiveJob(job.snapshot)
+        ? job.snapshot : await this.api.getJob(job.jobId);
       if (this.jobs.get(job.tabId) !== job || job.version !== version) return;
+      job.error = undefined;
       await this.deliver(job, snapshot);
-      if (isActiveJob(snapshot) && this.jobs.get(job.tabId) === job && job.version === version) job.stop = this.host.schedule(() => this.poll(job));
     } catch (error) {
       if (this.jobs.get(job.tabId) !== job || job.version !== version) return;
-      job.snapshot = { jobId: job.jobId, videoId: job.videoId, status: "failed", stage: "failed", progress: null, error: errorDetails(error), result: null };
-      await this.send(job.tabId, { type: "SET_PROGRESS", videoId: job.videoId, snapshot: job.snapshot }).catch(() => {});
-      await this.persist();
+      if (error instanceof ApiFailure && error.code === "INVALID_RESPONSE") {
+        job.error = errorDetails(error);
+        job.snapshot ??= { jobId: job.jobId, videoId: job.videoId, status: "queued", stage: "queued", progress: null, error: null, result: null };
+        this.schedule(job);
+        return;
+      }
+      await this.deliver(job, { jobId: job.jobId, videoId: job.videoId, status: "failed", stage: "failed", progress: null, error: errorDetails(error), result: null });
     }
   }
   private async deliver(job: TrackedJob, snapshot: JobSnapshot): Promise<void> {
     if (snapshot.videoId !== job.videoId || snapshot.jobId !== job.jobId) throw new ApiFailure("INVALID_RESPONSE", "本機服務回傳不相符的工作。", false);
+    const version = job.version;
+    const current = () => this.jobs.get(job.tabId) === job && job.version === version;
     job.snapshot = snapshot;
-    await this.send(job.tabId, { type: "SET_PROGRESS", videoId: job.videoId, snapshot });
-    if (this.jobs.get(job.tabId) !== job) return;
-    if (snapshot.status === "completed" && snapshot.result) {
-      await this.send(job.tabId, { type: "SET_SUBTITLES", videoId: job.videoId, enabled: true, document: snapshot.result });
+    job.pendingDelivery = true;
+    try {
+      await this.send(job.tabId, { type: "SET_PROGRESS", videoId: job.videoId, snapshot });
+      if (!current()) return;
+      if (snapshot.status === "completed" && snapshot.result) {
+        await this.send(job.tabId, { type: "SET_SUBTITLES", videoId: job.videoId, enabled: true, document: snapshot.result });
+      }
+      if (!current()) return;
+      job.pendingDelivery = false;
+      job.error = undefined;
+    } catch (error) {
+      if (!current()) return;
+      job.error = errorDetails(error);
+      if (job.error.code === "VIDEO_CHANGED") {
+        await this.pageChanged(job.tabId, null);
+        return;
+      }
+      // Content has accepted the document in this case; another send would seek
+      // to zero again instead of letting the user start playback manually.
+      if (job.error.code === "PLAYBACK_BLOCKED") job.pendingDelivery = false;
+      // Delivery failures leave the backend snapshot intact for a later retry.
     }
-    if (!isActiveJob(snapshot)) { job.stop?.(); await this.persist(); }
+    job.stop?.();
+    await this.persist();
+    if (current() && (isActiveJob(snapshot) || job.pendingDelivery)) this.schedule(job);
+  }
+  private schedule(job: TrackedJob): void {
+    job.stop?.();
+    job.stop = this.host.schedule(() => this.poll(job));
   }
   private persist(): Promise<void> {
-    return this.host.saveJobs([...this.jobs.values()].filter(job => job.snapshot === null || isActiveJob(job.snapshot)).map(({ tabId, videoId, jobId, cacheHit }) => ({ tabId, videoId, jobId, cacheHit })));
+    return this.host.saveJobs([...this.jobs.values()].filter(job => job.snapshot === null || isActiveJob(job.snapshot) || job.pendingDelivery).map(({ tabId, videoId, jobId, cacheHit }) => ({ tabId, videoId, jobId, cacheHit })));
   }
   private async restore(): Promise<void> {
     for (const value of await this.host.loadJobs()) {
@@ -138,7 +170,7 @@ export class BackgroundController {
       if (!ref || !Number.isInteger(ref.tabId) || typeof ref.videoId !== "string" || typeof ref.jobId !== "string" || typeof ref.cacheHit !== "boolean") continue;
       const job = { ...ref, snapshot: null, version: 0 } as TrackedJob;
       const page = await this.page(job.tabId);
-      if (page?.videoId !== job.videoId) continue;
+      if (page && page.videoId !== job.videoId) continue;
       this.jobs.set(job.tabId, job);
       await this.poll(job);
     }

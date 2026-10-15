@@ -9,6 +9,18 @@ const tick = () => vi.waitFor(() => expect(button("refresh").disabled).toBe(fals
 beforeEach(() => { document.documentElement.innerHTML = readFileSync("src/popup.html", "utf8"); });
 
 describe("popup user flow", () => {
+  it("allows cache-aware loading without ffmpeg but disables forced regeneration", async () => {
+    const current = state(); current.health!.ffmpegAvailable = false;
+    const messages: BackgroundRequest[] = [];
+    mountPopup(document, async message => { messages.push(message); return { ok: true, state: current }; }, 0);
+    await tick();
+    expect(button("start").disabled).toBe(false);
+    expect(button("regenerate").disabled).toBe(true);
+    button("start").click(); await tick();
+    expect(messages).toContainEqual({ type: "START_JOB", tabId: 7, force: false });
+    expect(document.querySelector("#error")?.textContent).toContain("快取");
+  });
+
   it("shows offline guidance and disables work actions", async () => {
     const current = { ...state(), health: null, error: { code: "SERVICE_OFFLINE", message: "請啟動本機服務", retryable: true } };
     mountPopup(document, async () => ({ ok: true, state: current }), 0);

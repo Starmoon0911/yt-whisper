@@ -3,6 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
 from ytwhisper.cache import CacheStore
 
 
@@ -15,6 +17,19 @@ DOCUMENT = {
     "generatedAt": "2026-10-15T12:00:00Z",
     "cues": [{"startMs": 0, "endMs": 900, "text": "Hello"}],
 }
+
+
+@pytest.mark.parametrize("document,requested_duration", [
+    ({**DOCUMENT, "durationMs": 0, "cues": []}, 1000),
+    ({**DOCUMENT, "durationMs": -1, "cues": []}, 1000),
+    ({**DOCUMENT, "durationMs": 2**53, "cues": []}, 2**53),
+    ({**DOCUMENT, "cues": [{"startMs": 9000, "endMs": 10001, "text": "Late"}]}, 10000),
+])
+def test_renderer_invalid_duration_is_a_cache_miss(tmp_path, document, requested_duration):
+    # Duration tolerance must never let renderer-invalid documents through.
+    cache = CacheStore(tmp_path)
+    cache.store(document)
+    assert cache.load(DOCUMENT["videoId"], requested_duration, DOCUMENT["model"]) is None
 
 
 class CacheStoreTests(unittest.TestCase):

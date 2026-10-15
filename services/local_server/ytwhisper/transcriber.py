@@ -33,18 +33,32 @@ def validate_result(value: Any) -> WhisperResult:
     if not isinstance(words, list):
         raise ValueError("Whisper output is missing word timestamps")
     previous_end = 0.0
+    normalized: list[dict[str, Any]] = []
+    leading_text = ""
     for word in words:
         if not isinstance(word, dict) or not isinstance(word.get("word"), str):
             raise ValueError("Whisper output has an invalid word")
         start, end = word.get("start"), word.get("end")
         if (
             not _finite_number(start) or not _finite_number(end)
-            or start < previous_end or end > duration
-            or round(end * 1000) <= round(start * 1000)
+            or start < previous_end or end < start or end > duration
+            or (end != start and round(end * 1000) <= round(start * 1000))
         ):
             raise ValueError("Whisper output has invalid or overlapping word timestamps")
         previous_end = end
-    return cast(WhisperResult, value)
+        # MLX alignment can place a real word at an instantaneous boundary.
+        # Preserve its text on a timed neighbor, without inventing an interval.
+        if start == end:
+            if normalized:
+                normalized[-1]["word"] += word["word"]
+            else:
+                leading_text += word["word"]
+        else:
+            normalized.append({**word, "word": leading_text + word["word"]})
+            leading_text = ""
+    if leading_text.strip():
+        raise ValueError("Whisper words have no timed neighbor")
+    return cast(WhisperResult, {**value, "words": normalized})
 
 
 class Transcriber:

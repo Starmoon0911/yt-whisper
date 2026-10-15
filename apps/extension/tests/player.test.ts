@@ -6,6 +6,18 @@ import { mediaFixture, otherVideoId, resetPage, videoId } from "./media";
 beforeEach(resetPage);
 
 describe("YouTube player state", () => {
+  it("retains saved playback when restoration is requested before metadata recovers", async () => {
+    const { video } = mediaFixture(); const player = new PlayerController(document);
+    player.pauseForProcessing();
+    Object.defineProperty(video, "duration", { configurable: true, value: NaN });
+    await player.restoreAfterProcessing();
+    expect(video.paused).toBe(true);
+    Object.defineProperty(video, "duration", { value: 10 });
+    await player.restoreAfterProcessing();
+    expect(video.paused).toBe(false);
+    expect(video.currentTime).toBe(4.25);
+  });
+
   it("detects only an eligible watch video inside the YouTube player", () => {
     const player = new PlayerController(document);
     expect(player.snapshot()).toBeNull();

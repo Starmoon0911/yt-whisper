@@ -88,6 +88,9 @@ def create_app(config: Config, pairing: PairingManager, jobs: JobManager) -> Fas
             response.headers["Vary"] = "Origin"
         return response
 
+    # Host-permitted Chrome extension GETs may omit Origin. POST read aliases
+    # use the browser's Origin header without relaxing the middleware check.
+    @app.post("/v1/health")
     @app.get("/v1/health")
     def health():
         return {
@@ -108,6 +111,7 @@ def create_app(config: Config, pairing: PairingManager, jobs: JobManager) -> Fas
         snapshot, cache_hit = jobs.create(request)
         return {"jobId": snapshot.jobId, "cacheHit": cache_hit}
 
+    @app.post("/v1/jobs/{job_id}")
     @app.get("/v1/jobs/{job_id}")
     def get_job(job_id: str):
         try:

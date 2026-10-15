@@ -58,6 +58,8 @@ uv run ytwhisper serve --extension-id YOUR_EXTENSION_ID --data-dir /absolute/pat
 
 服務一次處理一個工作；其他工作排隊。同一影片的進行中工作可能由多個分頁共用，取消會影響該共用工作。切換影片或關閉分頁只停止該分頁接收結果，後端工作仍可能繼續；需要取消時，請在切換前操作。
 
+同一影片暫時無法取得 metadata 時，工作仍會保留；完成結果與取消／失敗後的播放恢復會等影片準備好再套用。頁面暫時無法接收訊息時，擴充套件會保留並重試終止狀態的傳送。
+
 ## 資料、快取與權限
 
 預設資料目錄是 `~/Library/Application Support/ytWhisper/`：
@@ -73,6 +75,8 @@ uv run ytwhisper serve --extension-id YOUR_EXTENSION_ID --data-dir /absolute/pat
 字幕快取會檢查 schema、影片 ID、模型與影片長度（容許 2 秒差異），不合時會重新處理。若字幕有誤，可用「重新產生」覆寫該影片的快取。Hugging Face 模型快取由其套件管理，通常位於 `~/.cache/huggingface/`，也受 `HF_HOME` 等環境設定影響。
 
 擴充套件使用 `storage`、`tabs`、固定 `http://127.0.0.1:8765/*` host permission，以及僅限 YouTube HTTPS 網域的 content scripts。HTTP 請求由 background service worker 發出，token 不傳到影片頁面。服務要求啟動時指定的 `chrome-extension://…` Origin；工作 API 另外要求配對 token。一般網頁、缺少 Origin 的請求與其他擴充套件 Origin 都會被拒絕。
+
+健康與工作狀態查詢同時提供 `GET`、`POST /v1/health` 及 `GET`、`POST /v1/jobs/{id}`；兩種方法回傳相同資料，不修改工作。擴充套件使用 POST，讓瀏覽器依 [Fetch Origin 規則](https://fetch.spec.whatwg.org/#append-a-request-origin-header) 產生 Origin，避免 host permission 使 GET 免除 CORS 時缺少該標頭。GET 保留供帶正確 Origin 的相容用戶端使用；POST 工作查詢仍需 bearer token。
 
 辨識在此 Mac 進行；服務仍會向 YouTube 取得公開影片音訊，首次載入模型則會連線 Hugging Face。服務不讀取瀏覽器 cookies，也會忽略使用者的 yt-dlp 設定。
 
@@ -93,7 +97,7 @@ uv run ytwhisper serve --extension-id YOUR_EXTENSION_ID
 - 自動偵測語言並輸出原語言；不做翻譯，不保證中文繁簡轉換。Whisper 可能誤辨、人名有誤或在音樂／靜音處產生文字，字幕需自行核對。
 - 「本機服務離線」：確認終端機中的服務仍在執行、port `8765` 沒有被其他程序占用。重新啟動服務後，在 popup 按「重新整理」；進行中工作因服務重啟失效時，重新發起工作。
 - 無法配對或出現 `ORIGIN_FORBIDDEN`：核對 `chrome://extensions` 的 ID 與 `--extension-id` 完全一致。配對完成的服務不會再接受舊代碼；遺失 token 時使用重設配對流程。
-- 找不到 ffmpeg：在同一個啟動終端機執行 `ffmpeg -version`，修正 `PATH` 後重新啟動服務。目前 popup 在 ffmpeg 缺少時也會停用「產生／載入字幕」，即使已有快取。
+- 找不到 ffmpeg：仍可按「產生／載入字幕」嘗試讀取已有快取；沒有快取時會顯示後端錯誤，「重新產生」則停用。在同一個啟動終端機執行 `ffmpeg -version`，修正 `PATH` 後重新啟動服務即可產生新字幕。
 - 看不到目前影片：重新整理影片頁面，確認是一般 `/watch?v=…` 頁面且影片長度已載入。播放器頁面結構變更、廣告與 Chrome extension 政策也可能影響偵測。
 - `DOWNLOAD_FAILED`：先確認是可公開觀看的影片與網路可用；YouTube 限流、驗證要求或 yt-dlp 與網站變動不相容都可能造成失敗。本程式沒有登入或 cookie 匯入流程。
 - `TRANSCRIPTION_FAILED`：確認 Apple Silicon／Metal 可用、模型下載可連線、磁碟與記憶體足夠。首次下載可能較久；服務的階段狀態不代表精確下載進度。
