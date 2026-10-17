@@ -12,6 +12,20 @@ from .media import CommandRunner, check_cancelled
 from .transcriber import MODEL, Transcriber
 from .youtube import normalize_watch_url
 
+JS_RUNTIMES = ("deno", "node", "bun", "quickjs", "qjs")
+
+
+class MissingJsRuntime(RuntimeError):
+    """Raised when yt-dlp has no JavaScript runtime to solve YouTube challenges."""
+
+
+def js_runtime_args() -> list[str]:
+    """Enable the first JavaScript runtime available for yt-dlp's YouTube extractor."""
+    for runtime in JS_RUNTIMES:
+        if shutil.which(runtime):
+            return ["--js-runtimes", runtime]
+    raise MissingJsRuntime("Deno or another JavaScript runtime is required for downloads")
+
 
 class PipelineRequest(TypedDict):
     url: str
@@ -41,9 +55,10 @@ class MediaPipeline:
             on_state("downloading")
             check_cancelled(cancel_event)
             downloaded = self.runner.run(
-                [sys.executable, "-m", "yt_dlp", "--ignore-config", "--no-playlist",
-                 "--no-progress", "--match-filter", "!is_live", "--format", "bestaudio", "--output",
-                 str(work_dir / "source.%(ext)s"), "--print", "after_move:filepath", url],
+                [sys.executable, "-m", "yt_dlp", "--ignore-config", *js_runtime_args(),
+                 "--no-playlist", "--no-progress", "--match-filter", "!is_live", "--format",
+                 "bestaudio", "--output", str(work_dir / "source.%(ext)s"), "--print",
+                 "after_move:filepath", url],
                 lambda progress: None,
                 cancel_event,
             )

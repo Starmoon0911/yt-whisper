@@ -43,7 +43,7 @@ ytWhisper 由 Chrome 擴充套件與只監聽 localhost 的 Python 服務組成�
 - [Python](https://www.python.org/)、[FastAPI](https://fastapi.tiangolo.com/) 與 [uv](https://docs.astral.sh/uv/)
 - [MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper)
 - TypeScript、Chrome Extensions Manifest V3、[pnpm](https://pnpm.io/)
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) 與 [FFmpeg](https://ffmpeg.org/)
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp)（包含 [yt-dlp-ejs](https://pypi.org/project/yt-dlp-ejs/)）與 [FFmpeg](https://ffmpeg.org/)
 
 <p align="right">(<a href="#readme-top">回到頂端</a>)</p>
 
@@ -55,6 +55,7 @@ ytWhisper 由 Chrome 擴充套件與只監聽 localhost 的 Python 服務組成�
 - Python 3.10–3.13、Node.js、[uv](https://docs.astral.sh/uv/) 及 `package.json` 指定的 pnpm 版本。
 - Chrome 120 以上，且允許載入未封裝的擴充套件。
 - `ffmpeg` 位於啟動服務的終端機 `PATH` 中。使用 Homebrew 時可執行 `brew install ffmpeg`，再以 `ffmpeg -version` 確認。
+- JavaScript 執行環境（Node.js 或 [Deno](https://deno.com/)）位於同一個 `PATH` 中。yt-dlp 需要它解出 YouTube 的簽章與 PO token 挑戰；缺少時下載會以「找不到 JavaScript 執行環境」失敗。服務會依序選用 `deno`、`node`、`bun`、`quickjs`、`qjs`。
 - 安裝套件、下載影片及首次取得模型需要網路。預設模型 `mlx-community/whisper-large-v3-turbo` 的權重約 1.61 GB。
 
 ### 安裝與建置
@@ -156,6 +157,7 @@ uv run ytwhisper serve --extension-id YOUR_EXTENSION_ID
 - **本機服務離線**：確認服務仍在執行，且 port `8765` 未被占用；重新啟動後在 popup 按「重新整理」。
 - **無法配對／`ORIGIN_FORBIDDEN`**：確認 `chrome://extensions` 顯示的 ID 與 `--extension-id` 完全一致。遺失 token 時請重設配對。
 - **找不到 FFmpeg**：在啟動服務的同一終端機執行 `ffmpeg -version`，修正 `PATH` 後重新啟動。
+- **`JS_RUNTIME_MISSING`**：yt-dlp 需要 Node.js 或 Deno 才能解出 YouTube 的簽章與驗證挑戰。安裝後在啟動服務的同一終端機確認 `node --version`（或 `deno --version`），再重新啟動本機服務。此錯誤不會因重試而消失。
 - **看不到目前影片**：確認頁面是一般 `/watch?v=…` 影片，metadata 已載入，並重新整理頁面。
 - **`DOWNLOAD_FAILED`**：確認影片可公開觀看且網路正常。YouTube 限流、驗證要求或網站變動也可能造成失敗。
 - **`TRANSCRIPTION_FAILED`**：確認 Apple Silicon／Metal 可用、模型可下載，且磁碟與記憶體空間充足。
