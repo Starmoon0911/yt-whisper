@@ -7,7 +7,7 @@ import { mediaFixture, otherVideoId, resetPage, videoId } from "./media";
 
 type Listener = (message: unknown, sender: chrome.runtime.MessageSender, reply: (response: ContentResponse) => void) => boolean;
 const subtitles = (): SubtitleDocument => ({ schemaVersion: 1, videoId, language: "en", durationMs: 10000, model: "mlx-community/whisper-large-v3-turbo", generatedAt: "2026-10-15T00:00:00Z", cues: [{ startMs: 0, endMs: 1000, text: "Hello" }, { startMs: 4000, endMs: 5000, text: "Later" }] });
-const progress = (status: JobSnapshot["status"]): JobSnapshot => ({ jobId: "", videoId, status, stage: status, progress: null, error: status === "failed" ? { code: "DOWNLOAD_FAILED", message: "下載失敗", retryable: true } : null, result: null });
+const progress = (status: JobSnapshot["status"]): JobSnapshot => ({ jobId: "", videoId, status, stage: status, progress: null, speed: null, error: status === "failed" ? { code: "DOWNLOAD_FAILED", message: "下載失敗", retryable: true } : null, result: null });
 let stops: (() => void)[];
 let frames: Set<number>;
 beforeEach(() => {

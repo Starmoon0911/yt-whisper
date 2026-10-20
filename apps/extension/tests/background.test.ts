@@ -5,7 +5,7 @@ import type { ContentRequest, ContentResponse, JobSnapshot, PageState } from "..
 import { documentFixture, invalidDocuments } from "./documents";
 
 const page: PageState = { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", videoId: "dQw4w9WgXcQ", title: "Example", durationMs: 10000, hasSubtitles: false, subtitlesEnabled: true };
-const snapshot = (status: JobSnapshot["status"]): JobSnapshot => ({ jobId: "job-1", videoId: page.videoId, status, stage: status, progress: status === "completed" ? 1 : null, error: null, result: status === "completed" ? documentFixture() : null });
+const snapshot = (status: JobSnapshot["status"]): JobSnapshot => ({ jobId: "job-1", videoId: page.videoId, status, stage: status, progress: status === "completed" ? 1 : null, speed: null, error: null, result: status === "completed" ? documentFixture() : null });
 function harness(options: { cacheHit?: boolean; offline?: boolean; paired?: boolean; initialJobs?: unknown[]; initialPageMissing?: boolean; createError?: boolean; getJob?: () => Promise<JobSnapshot> } = {}) {
   const messages: ContentRequest[] = [];
   const pending: (() => void)[] = [];
@@ -50,7 +50,7 @@ describe("background job orchestration", () => {
   it("keeps a cancelable job when its first status response is malformed", async () => {
     const client = new LocalApiClient({ async get() { return { token: "secret" }; }, async set() {}, async remove() {} }, async () => new Response(JSON.stringify({ ...snapshot("completed"), result: null })));
     const h = harness({ getJob: () => client.getJob("job-1") });
-    expect(await h.controller.handle({ type: "START_JOB", tabId: 7 })).toMatchObject({ ok: true, state: { job: { status: "queued" }, error: { code: "INVALID_RESPONSE" } } });
+    expect(await h.controller.handle({ type: "START_JOB", tabId: 7 })).toMatchObject({ ok: true, state: { job: { status: "queued", speed: null }, error: { code: "INVALID_RESPONSE" } } });
     await h.controller.handle({ type: "START_JOB", tabId: 7 });
     expect(h.creates).toBe(1);
     expect(h.pending).toHaveLength(1);
@@ -229,7 +229,7 @@ describe("background job orchestration", () => {
   it("restores the processing UI when job creation fails after pausing", async () => {
     const h = harness({ createError: true });
     expect(await h.controller.handle({ type: "START_JOB", tabId: 7 })).toMatchObject({ ok: false, error: { code: "DOWNLOAD_FAILED", retryable: true } });
-    expect(h.messages.at(-1)).toMatchObject({ type: "SET_PROGRESS", snapshot: { status: "failed", error: { code: "DOWNLOAD_FAILED" } } });
+    expect(h.messages.at(-1)).toMatchObject({ type: "SET_PROGRESS", snapshot: { status: "failed", stage: "failed", speed: null, error: { code: "DOWNLOAD_FAILED" } } });
     expect(h.pending).toHaveLength(0);
   });
 

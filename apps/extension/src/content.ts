@@ -49,7 +49,7 @@ class ContentController {
     if (value.type === "START_JOB") {
       if (!this.player.snapshot() || !this.overlay) return failure("NO_VIDEO", "請等待一般 YouTube 影片載入；不支援直播。", false);
       this.player.pauseForProcessing();
-      this.progress = { jobId: "", videoId: value.videoId, status: "queued", stage: "queued", progress: null, error: null, result: null };
+      this.progress = { jobId: "", videoId: value.videoId, status: "queued", stage: "queued", progress: null, speed: null, error: null, result: null };
       this.overlay.setProgress(this.progress);
     } else if (value.type === "SET_PROGRESS") {
       if (!validSnapshot(value.snapshot) || value.snapshot.videoId !== this.videoId) return failure("INVALID_MESSAGE", "工作與目前影片不相符。", false);

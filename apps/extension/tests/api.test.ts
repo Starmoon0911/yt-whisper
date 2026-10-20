@@ -38,12 +38,24 @@ describe("localhost API boundary", () => {
   });
 
   it.each(invalidDocuments)("rejects completed $name before exposing a terminal job", async ({ value }) => {
-    const completed = { jobId: "job-1", videoId: request.videoId, status: "completed", stage: "completed", progress: 1, error: null, result: value };
+    const completed = { jobId: "job-1", videoId: request.videoId, status: "completed", stage: "completed", progress: 1, speed: null, error: null, result: value };
     await expect(harness([json(completed)], "secret").api.getJob("job-1")).rejects.toMatchObject({ code: "INVALID_RESPONSE", retryable: true });
   });
 
+  it("validates the download speed field alongside progress", async () => {
+    const base = { jobId: "job-1", videoId: request.videoId, status: "downloading", stage: "downloading", progress: 0.5, error: null, result: null };
+    for (const speed of [null, 0, 2048.5]) {
+      await expect(harness([json({ ...base, speed })], "secret").api.getJob("job-1")).resolves.toMatchObject({ speed });
+    }
+    // NaN/Infinity cannot survive JSON, so the realistic wire corruptions are strings and omissions.
+    for (const speed of ["2048", true]) {
+      await expect(harness([json({ ...base, speed })], "secret").api.getJob("job-1")).rejects.toMatchObject({ code: "INVALID_RESPONSE", retryable: true });
+    }
+    await expect(harness([json(base)], "secret").api.getJob("job-1")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
   it("uses Origin-bearing POST reads with bearer auth only for job status", async () => {
-    const job = { jobId: "job-1", videoId: request.videoId, status: "transcribing", stage: "transcribing", progress: null, error: null, result: null };
+    const job = { jobId: "job-1", videoId: request.videoId, status: "transcribing", stage: "transcribing", progress: null, speed: null, error: null, result: null };
     const { api, calls } = harness([
       json({ status: "ok", pairingRequired: false, ffmpegAvailable: true, model: "whisper" }), json(job),
     ], "secret");
@@ -107,7 +119,7 @@ describe("localhost API boundary", () => {
   });
 
   it("reads cache-hit job snapshots and uses DELETE for cancellation", async () => {
-    const snapshot = { jobId: "job/1", videoId: request.videoId, status: "completed", stage: "completed", progress: 1, error: null, result: documentFixture() };
+    const snapshot = { jobId: "job/1", videoId: request.videoId, status: "completed", stage: "completed", progress: 1, speed: null, error: null, result: documentFixture() };
     const { api, calls } = harness([json({ jobId: "job/1", cacheHit: true }), json(snapshot), json({ ...snapshot, status: "canceled" })], "secret");
     expect(await api.createJob(request)).toEqual({ jobId: "job/1", cacheHit: true });
     expect(await api.getJob("job/1")).toEqual(snapshot);

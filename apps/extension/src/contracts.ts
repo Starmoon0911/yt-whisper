@@ -7,7 +7,7 @@ export interface JobRequest { url: string; videoId: string; durationMs: number; 
 export interface JobCreated { jobId: string; cacheHit: boolean }
 export interface JobSnapshot {
   jobId: string; videoId: string; status: JobStatus; stage: JobStatus;
-  progress: number | null; error: ApiError | null; result: SubtitleDocument | null;
+  progress: number | null; speed: number | null; error: ApiError | null; result: SubtitleDocument | null;
 }
 export interface PageState {
   url: string; videoId: string; title: string; durationMs: number;

@@ -58,7 +58,7 @@ describe("popup user flow", () => {
 
   it("shows progress and cancellation while preventing a duplicate start", async () => {
     const current = state();
-    current.job = { jobId: "job-1", videoId: current.page!.videoId, status: "transcribing", stage: "transcribing", progress: 0.4, error: null, result: null };
+    current.job = { jobId: "job-1", videoId: current.page!.videoId, status: "transcribing", stage: "transcribing", progress: 0.4, speed: null, error: null, result: null };
     const messages: BackgroundRequest[] = [];
     mountPopup(document, async message => { messages.push(message); return { ok: true, state: current }; }, 0);
     await tick();
@@ -71,7 +71,7 @@ describe("popup user flow", () => {
 
   it("toggles subtitles and labels a completed cache hit", async () => {
     const current = state(); current.page!.hasSubtitles = true; current.cacheHit = true;
-    current.job = { jobId: "job-1", videoId: current.page!.videoId, status: "completed", stage: "completed", progress: 1, error: null, result: null };
+    current.job = { jobId: "job-1", videoId: current.page!.videoId, status: "completed", stage: "completed", progress: 1, speed: null, error: null, result: null };
     const messages: BackgroundRequest[] = [];
     mountPopup(document, async message => { messages.push(message); return { ok: true, state: current }; }, 0);
     await tick();

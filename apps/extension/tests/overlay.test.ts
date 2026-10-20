@@ -9,7 +9,7 @@ import { invalidDocuments } from "./documents";
 const subtitles = (): SubtitleDocument => ({ schemaVersion: 1, videoId, language: "en", durationMs: 10000, model: "mlx-community/whisper-large-v3-turbo", generatedAt: "2026-10-15T00:00:00Z", cues: [
   { startMs: 0, endMs: 1000, text: "First" }, { startMs: 1000, endMs: 2000, text: "Second\nline" }, { startMs: 3000, endMs: 4000, text: "<img src=x onerror=alert(1)>" },
 ] });
-const progress = (status: JobSnapshot["status"], value: number | null = null): JobSnapshot => ({ jobId: "job-1", videoId, status, stage: status, progress: value, error: null, result: null });
+const progress = (status: JobSnapshot["status"], value: number | null = null, speed: number | null = null): JobSnapshot => ({ jobId: "job-1", videoId, status, stage: status, progress: value, speed, error: null, result: null });
 let frames: Map<number, FrameRequestCallback>;
 let overlays: SubtitleOverlay[];
 beforeEach(() => {

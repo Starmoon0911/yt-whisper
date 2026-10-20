@@ -100,7 +100,7 @@ export class BackgroundController {
       await this.poll(job);
     } catch (error) {
       if (pausedPage) {
-        const failed: JobSnapshot = { jobId: "", videoId: pausedPage.videoId, status: "failed", stage: "failed", progress: null, error: errorDetails(error), result: null };
+        const failed: JobSnapshot = { jobId: "", videoId: pausedPage.videoId, status: "failed", stage: "failed", progress: null, speed: null, error: errorDetails(error), result: null };
         await this.send(tabId, { type: "SET_PROGRESS", videoId: pausedPage.videoId, snapshot: failed }).catch(() => {});
       }
       throw error;
@@ -119,11 +119,11 @@ export class BackgroundController {
       if (this.jobs.get(job.tabId) !== job || job.version !== version) return;
       if (error instanceof ApiFailure && error.code === "INVALID_RESPONSE") {
         job.error = errorDetails(error);
-        job.snapshot ??= { jobId: job.jobId, videoId: job.videoId, status: "queued", stage: "queued", progress: null, error: null, result: null };
+        job.snapshot ??= { jobId: job.jobId, videoId: job.videoId, status: "queued", stage: "queued", progress: null, speed: null, error: null, result: null };
         this.schedule(job);
         return;
       }
-      await this.deliver(job, { jobId: job.jobId, videoId: job.videoId, status: "failed", stage: "failed", progress: null, error: errorDetails(error), result: null });
+      await this.deliver(job, { jobId: job.jobId, videoId: job.videoId, status: "failed", stage: "failed", progress: null, speed: null, error: errorDetails(error), result: null });
     }
   }
   private async deliver(job: TrackedJob, snapshot: JobSnapshot): Promise<void> {

@@ -23,6 +23,7 @@ function validSuccess(path: string, value: unknown): boolean {
   const statuses = ["queued", "downloading", "converting", "transcribing", "completed", "failed", "canceled"];
   return typeof data.jobId === "string" && typeof data.videoId === "string" && statuses.includes(data.status as string) && statuses.includes(data.stage as string)
     && (data.progress === null || typeof data.progress === "number" && Number.isFinite(data.progress))
+    && (data.speed === null || typeof data.speed === "number" && Number.isFinite(data.speed))
     && (data.error === null || !!data.error && typeof data.error === "object" && typeof (data.error as ApiError).code === "string" && typeof (data.error as ApiError).message === "string" && typeof (data.error as ApiError).retryable === "boolean")
     && (data.result === null ? data.status !== "completed" : validDocument(data.result, data.videoId as string));
 }
