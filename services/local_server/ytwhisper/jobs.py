@@ -113,6 +113,7 @@ class JobManager:
                     continue
                 job.snapshot = job.snapshot.model_copy(update={
                     "status": "downloading", "stage": "downloading",
+                    "progress": None, "speed": None,
                 })
             work_dir = None
             result = error = None
@@ -122,13 +123,25 @@ class JobManager:
                 if state not in {"downloading", "converting", "transcribing"}:
                     raise ValueError("Invalid pipeline stage")
                 with self._lock:
-                    job.snapshot = job.snapshot.model_copy(update={"status": state, "stage": state})
+                    job.snapshot = job.snapshot.model_copy(update={
+                        "status": state, "stage": state, "progress": None, "speed": None,
+                    })
+
+            def download_progress(progress: float | None, speed: float | None, *,
+                                  job: _Job = job) -> None:
+                # Live progress only belongs to the downloading stage; late
+                # callbacks after a stage change must not resurrect stale values.
+                with self._lock:
+                    if job.snapshot.status == "downloading":
+                        job.snapshot = job.snapshot.model_copy(
+                            update={"progress": progress, "speed": speed})
 
             try:
                 self.work_dir.mkdir(parents=True, exist_ok=True)
                 work_dir = Path(tempfile.mkdtemp(prefix=f"{job_id}-", dir=self.work_dir))
                 result = self.pipeline.process(
                     job.request.model_dump(exclude={"force"}), work_dir, on_state, job.cancel_event,
+                    download_progress=download_progress,
                 )
                 status = "completed"
             except CancelledError:

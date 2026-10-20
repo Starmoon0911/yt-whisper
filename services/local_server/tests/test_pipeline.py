@@ -49,9 +49,10 @@ def tearDownModule():
 class ScriptedRunner:
     """Isolate network, ffmpeg, and MLX while preserving actual disk artifacts."""
 
-    def __init__(self, work_dir):
+    def __init__(self, work_dir, *, progress_lines=()):
         self.work_dir = work_dir
         self.commands = []
+        self.progress_lines = progress_lines
 
     def run(self, command, on_progress, cancel_event):
         from ytwhisper.media import CompletedCommand
@@ -60,7 +61,13 @@ class ScriptedRunner:
         if command[:3] == [sys.executable, "-m", "yt_dlp"]:
             source = self.work_dir / "source.webm"
             source.write_bytes(b"downloaded audio")
-            return CompletedCommand(command, 0, str(source) + "\n", "")
+            # Mirror CommandRunner streaming: each PROG line on its own, then the
+            # complete stdout once so plain observers still see everything.
+            for line in self.progress_lines:
+                on_progress(line)
+            stdout = "".join(line + "\n" for line in self.progress_lines) + str(source) + "\n"
+            on_progress(stdout)
+            return CompletedCommand(command, 0, stdout, "")
         if command[0] == "ffmpeg":
             Path(command[-1]).write_bytes(b"converted audio")
         elif command[:3] == [sys.executable, "-m", "ytwhisper.whisper_worker"]:
@@ -805,7 +812,7 @@ class MediaPipelineTests(unittest.TestCase):
 
     def test_success_uses_audio_commands_and_caches_original_language_cues(self):
         # Catches wrong tool arguments, translation, incomplete cache, or success leaks.
-        from ytwhisper.pipeline import MediaPipeline
+        from ytwhisper.pipeline import PROGRESS_TEMPLATE, MediaPipeline
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -820,7 +827,8 @@ class MediaPipelineTests(unittest.TestCase):
 
             self.assertEqual(runner.commands, [
                 [sys.executable, "-m", "yt_dlp", "--ignore-config", "--js-runtimes", "deno",
-                 "--no-playlist", "--no-progress", "--match-filter", "!is_live", "--format",
+                 "--no-playlist", "--progress", "--newline", "--progress-template",
+                 PROGRESS_TEMPLATE, "--match-filter", "!is_live", "--format",
                  "bestaudio", "--output", str(work_dir / "source.%(ext)s"), "--print",
                  "after_move:filepath", f"https://www.youtube.com/watch?v={VIDEO_ID}"],
                 ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i",
@@ -842,6 +850,45 @@ class MediaPipelineTests(unittest.TestCase):
             self.assertEqual(cache.load(VIDEO_ID, 10000, MODEL), document)
             self.assertEqual(list(cache.directory.iterdir()), [cache.path_for(VIDEO_ID)])
             self.assertFalse(work_dir.exists())
+
+    def test_parse_progress_line_handles_na_and_malformed_output(self):
+        # Progress parsing must tolerate unknown fields and never crash on odd output.
+        from ytwhisper.pipeline import parse_progress_line
+
+        self.assertEqual(parse_progress_line("PROG 100 400 400 2048"), (0.25, 2048.0))
+        self.assertEqual(parse_progress_line("PROG 200 NA 600 NA"), (200 / 600, None))
+        self.assertEqual(parse_progress_line("PROG NA NA NA NA"), (None, None))
+        self.assertEqual(parse_progress_line("PROG NA NA NA 2048"), (None, 2048.0))
+        self.assertEqual(parse_progress_line("PROG 500 400 NA NA"), (1.0, None))
+        self.assertIsNone(parse_progress_line("PROG 100 400 400"))
+        self.assertIsNone(parse_progress_line("PROG abc 400 400 2048"))
+        self.assertIsNone(parse_progress_line("[download]  50.0% of 4.00MiB"))
+        self.assertIsNone(parse_progress_line("download: 100"))
+
+    def test_download_reports_progress_and_speed_from_template_lines(self):
+        # The speed/progress display depends on forwarding live template lines.
+        from ytwhisper.pipeline import MediaPipeline
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work_dir = root / "work"
+            cache = CacheStore(root / "cache")
+            runner = ScriptedRunner(work_dir, progress_lines=[
+                "PROG 100 400 400 2048",
+                "PROG 200 NA 600 NA",
+                "PROG NA NA NA NA",
+            ])
+            updates = []
+            MediaPipeline(cache, runner=runner).process(
+                REQUEST, work_dir, lambda state: None, threading.Event(),
+                download_progress=lambda progress, speed: updates.append((progress, speed)),
+            )
+            # The final combined stdout re-delivers these lines, so each lands once.
+            self.assertEqual(len(updates), 3)
+            self.assertEqual(updates[0], (0.25, 2048.0))
+            self.assertAlmostEqual(updates[1][0], 200 / 600)
+            self.assertIsNone(updates[1][1])
+            self.assertEqual(updates[2], (None, None))
 
     def test_download_enables_the_first_available_js_runtime(self):
         # Catches yt-dlp degrading YouTube extraction because no JS runtime is enabled.

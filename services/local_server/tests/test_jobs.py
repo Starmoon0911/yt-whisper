@@ -22,18 +22,20 @@ DOCUMENT = {
 class ControlledPipeline:
     """Control only external media work; exercise the real queue and cache."""
 
-    def __init__(self, cache, *, fail=None, committed=False, failure_stage="downloading"):
+    def __init__(self, cache, *, fail=None, committed=False, failure_stage="downloading",
+                 report=None):
         self.cache = cache
         self.fail = fail
         self.committed = committed
         self.failure_stage = failure_stage
+        self.report = report
         self.started = threading.Event()
         self.release = threading.Event()
         self.calls = []
         self.active = 0
         self.max_active = 0
 
-    def process(self, request, work_dir, on_state, cancel_event):
+    def process(self, request, work_dir, on_state, cancel_event, download_progress=None):
         self.cancel_event = cancel_event
         self.calls.append(request)
         self.active += 1
@@ -42,6 +44,8 @@ class ControlledPipeline:
         (work_dir / "audio.wav").write_bytes(b"temporary media")
         try:
             on_state("downloading")
+            if self.report is not None and download_progress is not None:
+                download_progress(*self.report)
             document = {**copy.deepcopy(DOCUMENT), "videoId": request["videoId"]}
             if self.committed:
                 self.cache.store(document, cancel_event=cancel_event)
@@ -215,6 +219,24 @@ def test_snapshots_are_independent_copies_and_unknown_ids_raise(setup_jobs):
         manager.get("unknown")
     with pytest.raises(KeyError):
         manager.cancel("unknown")
+
+
+def test_download_progress_is_recorded_then_cleared_on_stage_change(setup_jobs):
+    # Speed must only surface while downloading and never bleed into later stages.
+    manager, pipeline, _ = setup_jobs(report=(0.5, 1024.0))
+    job, _ = manager.create(REQUEST)
+    assert pipeline.started.wait(1)
+
+    downloading = manager.get(job.jobId)
+    assert downloading.status == "downloading"
+    assert downloading.progress == 0.5
+    assert downloading.speed == 1024.0
+
+    pipeline.release.set()
+    completed = wait_terminal(manager, job.jobId)
+    assert completed.status == "completed"
+    assert completed.progress is None
+    assert completed.speed is None
 
 
 def test_shutdown_cancels_queue_and_rejects_new_work(setup_jobs):

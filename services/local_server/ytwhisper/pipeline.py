@@ -14,9 +14,44 @@ from .youtube import normalize_watch_url
 
 JS_RUNTIMES = ("deno", "node", "bun", "quickjs", "qjs")
 
+# A fixed prefix plus numeric fields keeps the progress parser independent of the
+# terminal renderer. ``--print`` forces quiet mode, so ``--progress`` is required
+# for these lines to be emitted at all; ``--newline`` keeps them one-per-line.
+PROGRESS_TEMPLATE = (
+    "PROG %(progress.downloaded_bytes)s %(progress.total_bytes)s "
+    "%(progress.total_bytes_estimate)s %(progress.speed)s"
+)
+
 
 class MissingJsRuntime(RuntimeError):
     """Raised when yt-dlp has no JavaScript runtime to solve YouTube challenges."""
+
+
+def _progress_value(token: str) -> float | None:
+    return None if token == "NA" else float(token)
+
+
+def parse_progress_line(line: str) -> tuple[float | None, float | None] | None:
+    """Return ``(progress, speed)`` from a live progress line, or None if not one.
+
+    ``progress`` is the downloaded/total ratio falling back to the estimated total
+    (common for adaptive streams); ``speed`` is yt-dlp's native bytes/s. Unknown
+    fields are None and malformed lines are ignored rather than raising.
+    """
+    if not line.startswith("PROG "):
+        return None
+    fields = line[len("PROG "):].split()
+    if len(fields) != 4:
+        return None
+    try:
+        downloaded, total, estimate, speed = (_progress_value(field) for field in fields)
+    except ValueError:
+        return None
+    denominator = total if total is not None else estimate
+    progress = None
+    if downloaded is not None and denominator is not None and denominator > 0:
+        progress = min(max(downloaded / denominator, 0.0), 1.0)
+    return progress, speed
 
 
 def js_runtime_args() -> list[str]:
@@ -25,6 +60,27 @@ def js_runtime_args() -> list[str]:
         if shutil.which(runtime):
             return ["--js-runtimes", runtime]
     raise MissingJsRuntime("Deno or another JavaScript runtime is required for downloads")
+
+
+def _download_observer(
+    download_progress: Callable[[float | None, float | None], None] | None,
+) -> Callable[[str], None]:
+    """Translate CommandRunner output into live progress calls.
+
+    Streaming hands over each stdout line on its own and then the full output once;
+    only the single lines matter here, so the final dump cannot duplicate updates.
+    """
+    if download_progress is None:
+        return lambda _text: None
+
+    def observe(text: str) -> None:
+        if "\n" in text:
+            return
+        parsed = parse_progress_line(text)
+        if parsed is not None:
+            download_progress(*parsed)
+
+    return observe
 
 
 class PipelineRequest(TypedDict):
@@ -41,7 +97,8 @@ class MediaPipeline:
 
     def process(
         self, request: PipelineRequest, work_dir: Path, on_state: Callable[[str], None],
-        cancel_event: Event,
+        cancel_event: Event, *,
+        download_progress: Callable[[float | None, float | None], None] | None = None,
     ) -> SubtitleDocument:
         """Own a new or empty per-job directory, including on invalid requests."""
         if work_dir.is_symlink() or (
@@ -56,10 +113,11 @@ class MediaPipeline:
             check_cancelled(cancel_event)
             downloaded = self.runner.run(
                 [sys.executable, "-m", "yt_dlp", "--ignore-config", *js_runtime_args(),
-                 "--no-playlist", "--no-progress", "--match-filter", "!is_live", "--format",
-                 "bestaudio", "--output", str(work_dir / "source.%(ext)s"), "--print",
+                 "--no-playlist", "--progress", "--newline", "--progress-template",
+                 PROGRESS_TEMPLATE, "--match-filter", "!is_live", "--format", "bestaudio",
+                 "--output", str(work_dir / "source.%(ext)s"), "--print",
                  "after_move:filepath", url],
-                lambda progress: None,
+                _download_observer(download_progress),
                 cancel_event,
             )
             check_cancelled(cancel_event)
