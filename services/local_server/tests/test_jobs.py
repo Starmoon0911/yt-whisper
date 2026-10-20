@@ -239,6 +239,29 @@ def test_download_progress_is_recorded_then_cleared_on_stage_change(setup_jobs):
     assert completed.speed is None
 
 
+def test_cancel_during_downloading_clears_live_progress_on_terminal_snapshot(setup_jobs):
+    # Cancelling mid-download must not publish a "canceled" snapshot that still
+    # carries the last live progress/speed values.
+    manager, pipeline, _ = setup_jobs(report=(0.5, 1024.0))
+    job, _ = manager.create(REQUEST)
+    assert pipeline.started.wait(1)
+    assert manager.get(job.jobId).speed == 1024.0
+
+    canceller = threading.Thread(target=manager.cancel, args=(job.jobId,))
+    canceller.start()
+    deadline = time.monotonic() + 1
+    while not pipeline.cancel_event.is_set():
+        assert time.monotonic() < deadline
+        time.sleep(0.005)
+    pipeline.release.set()
+    canceller.join(2)
+
+    canceled = wait_terminal(manager, job.jobId)
+    assert canceled.status == "canceled"
+    assert canceled.progress is None
+    assert canceled.speed is None
+
+
 def test_shutdown_cancels_queue_and_rejects_new_work(setup_jobs):
     manager, pipeline, _ = setup_jobs()
     first, _ = manager.create(REQUEST)

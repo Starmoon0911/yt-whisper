@@ -99,6 +99,7 @@ class JobManager:
     def _finish(self, job: _Job, status: str, *, result=None, error=None) -> None:
         job.snapshot = job.snapshot.model_copy(update={
             "status": status, "stage": status, "result": result, "error": error,
+            "progress": None, "speed": None,
         })
         key = (job.request.videoId, MODEL)
         if self._active.get(key) == job.snapshot.jobId:

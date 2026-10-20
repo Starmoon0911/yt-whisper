@@ -13,6 +13,7 @@ function validSnapshot(value: unknown): value is JobSnapshot {
   const error = value.error;
   return typeof value.jobId === "string" && typeof value.videoId === "string" && statuses.includes(value.status as string) && statuses.includes(value.stage as string)
     && (value.progress === null || typeof value.progress === "number" && Number.isFinite(value.progress))
+    && (value.speed === null || typeof value.speed === "number" && Number.isFinite(value.speed))
     && (error === null || record(error) && typeof error.code === "string" && typeof error.message === "string" && typeof error.retryable === "boolean")
     && (value.result === null || record(value.result));
 }
