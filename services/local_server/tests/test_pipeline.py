@@ -71,7 +71,7 @@ class ScriptedRunner:
 
 
 class CommandRunnerTests(unittest.TestCase):
-    def test_cancellation_when_communication_finishes_does_not_return_success(self):
+    def test_cancellation_when_process_finishes_does_not_return_success(self):
         # Catches cancellation arriving after the last polling check but before return.
         from ytwhisper.media import CommandRunner
 
@@ -81,16 +81,17 @@ class CommandRunnerTests(unittest.TestCase):
             command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             start_new_session=True,
         )
-        communicate = process.communicate
+        poll = process.poll
 
-        def finish_and_cancel(*args, **kwargs):
-            output = communicate(*args, **kwargs)
-            cancel_event.set()
-            return output
+        def poll_and_cancel():
+            status = poll()
+            if status is not None:
+                cancel_event.set()
+            return status
 
         with (
             patch("ytwhisper.media.subprocess.Popen", return_value=process),
-            patch.object(process, "communicate", side_effect=finish_and_cancel),
+            patch.object(process, "poll", side_effect=poll_and_cancel),
             self.assertRaises(CancelledError),
         ):
             CommandRunner().run(command, lambda progress: None, cancel_event)
@@ -339,6 +340,57 @@ class CommandRunnerTests(unittest.TestCase):
         self.assertEqual(result.stdout, "literal $(do-not-run); spaces\n")
         self.assertEqual(result.stderr, "diagnostic\n")
         self.assertIn("literal $(do-not-run); spaces", "".join(progress))
+
+    def test_streams_progress_lines_while_the_process_is_still_running(self):
+        # Catches progress reaching callers only after exit, which freezes live speed.
+        from ytwhisper.media import CommandRunner
+
+        with tempfile.TemporaryDirectory() as directory:
+            gate = Path(directory) / "go"
+            command = [sys.executable, "-c",
+                       "import pathlib,sys,time; print('PROG 100 400 400 2048', flush=True); "
+                       "end = time.monotonic() + 2\n"
+                       "while not pathlib.Path(sys.argv[1]).exists() and time.monotonic() < end:"
+                       " time.sleep(0.01)", str(gate)]
+            seen = []
+
+            def on_progress(line):
+                seen.append(line)
+                if line.startswith("PROG "):
+                    gate.touch()
+
+            started = time.monotonic()
+            result = CommandRunner().run(command, on_progress, threading.Event())
+
+            self.assertLess(time.monotonic() - started, 1.5, "progress arrived only after exit")
+            self.assertIn("PROG 100 400 400 2048", seen)
+            self.assertIn("PROG 100 400 400 2048", result.stdout)
+
+    def test_non_progress_lines_reach_the_callback_only_in_the_final_stdout(self):
+        # Catches double-delivery or loss of the whole-stdout contract callers rely on.
+        from ytwhisper.media import CommandRunner
+
+        command = [sys.executable, "-c",
+                   "print('banner line'); print('PROG 3 10 10 512'); print('PROG 10 10 NA NA')"]
+        calls = []
+        result = CommandRunner().run(command, calls.append, threading.Event())
+
+        self.assertEqual([call for call in calls if call.startswith("PROG ")],
+                         ["PROG 3 10 10 512", "PROG 10 10 NA NA"])
+        self.assertEqual(calls[-1], result.stdout)
+        self.assertEqual(result.stdout.count("\n"), 3)
+
+    def test_partial_lines_wait_for_the_trailing_newline(self):
+        # Catches half-written lines reaching the parser and racing against completion.
+        from ytwhisper.media import CommandRunner
+
+        command = [sys.executable, "-c",
+                   "import sys,time; sys.stdout.write('PROG 50 100 100 1024');"
+                   "sys.stdout.flush(); time.sleep(0.3); print()"]
+        calls = []
+        result = CommandRunner().run(command, calls.append, threading.Event())
+
+        self.assertEqual(calls, ["PROG 50 100 100 1024", result.stdout])
 
 
 class WhisperWorkerTests(unittest.TestCase):
