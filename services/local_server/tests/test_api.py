@@ -69,7 +69,7 @@ def test_health_pairing_and_authenticated_cache_job_lifecycle(tmp_path):
         assert snapshot.status_code == 200
         assert snapshot.json() == {
             "jobId": job_id, "videoId": VIDEO_ID, "status": "completed", "stage": "completed",
-            "progress": None, "error": None, "result": DOCUMENT,
+            "progress": None, "speed": None, "error": None, "result": DOCUMENT,
         }
         assert client.delete(f"/v1/jobs/{job_id}").json()["status"] == "completed"
         assert_error(client.post("/v1/pair", json={"code": "123456"}), 400, "PAIRING_FAILED")

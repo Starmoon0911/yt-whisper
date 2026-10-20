@@ -41,5 +41,6 @@ class JobSnapshot(BaseModel):
     status: JobStatus
     stage: JobStatus
     progress: float | None = None
+    speed: float | None = None
     error: ApiError | None = None
     result: dict[str, Any] | None = None
