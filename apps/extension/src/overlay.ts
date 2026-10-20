@@ -1,4 +1,5 @@
 import { isActiveJob, type JobSnapshot } from "./contracts";
+import { formatSpeed } from "./speed";
 import { cueAtTime, validDocument, type SubtitleDocument } from "./subtitles";
 
 export class SubtitleOverlay {
@@ -50,7 +51,8 @@ export class SubtitleOverlay {
     this.status.hidden = !this.processing && snapshot.status !== "failed";
     this.progress.hidden = !this.processing;
     const labels = { queued: "字幕工作排隊中…", downloading: "正在下載音訊…", converting: "正在轉換音訊…", transcribing: "正在辨識字幕…", completed: "", failed: "字幕處理失敗，請重試。", canceled: "" };
-    this.statusText.textContent = snapshot.status === "failed" ? snapshot.error?.message || labels.failed : labels[snapshot.stage];
+    const label = snapshot.status === "failed" ? snapshot.error?.message || labels.failed : labels[snapshot.stage];
+    this.statusText.textContent = snapshot.stage === "downloading" && typeof snapshot.speed === "number" ? `${label} · ${formatSpeed(snapshot.speed)}` : label;
     if (snapshot.progress === null || !Number.isFinite(snapshot.progress)) this.progress.removeAttribute("value");
     else this.progress.value = Math.min(1, Math.max(0, snapshot.progress));
     this.update();

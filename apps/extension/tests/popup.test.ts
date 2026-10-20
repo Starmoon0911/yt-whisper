@@ -69,6 +69,19 @@ describe("popup user flow", () => {
     expect(messages).toContainEqual({ type: "CANCEL_JOB", tabId: 7 });
   });
 
+  it("appends live download speed to the status while downloading only", async () => {
+    const current = state();
+    current.job = { jobId: "job-1", videoId: current.page!.videoId, status: "downloading", stage: "downloading", progress: 0.3, speed: 2516582, error: null, result: null };
+    const dispose = mountPopup(document, async () => ({ ok: true, state: current }), 0);
+    await tick();
+    expect(document.querySelector("#job-status")?.textContent).toBe("下載音訊中 · 2.4 MB/s");
+    dispose();
+    current.job = { ...current.job, status: "transcribing", stage: "transcribing", speed: 512 };
+    mountPopup(document, async () => ({ ok: true, state: current }), 0);
+    await tick();
+    expect(document.querySelector("#job-status")?.textContent).toBe("Whisper 辨識中");
+  });
+
   it("toggles subtitles and labels a completed cache hit", async () => {
     const current = state(); current.page!.hasSubtitles = true; current.cacheHit = true;
     current.job = { jobId: "job-1", videoId: current.page!.videoId, status: "completed", stage: "completed", progress: 1, speed: null, error: null, result: null };

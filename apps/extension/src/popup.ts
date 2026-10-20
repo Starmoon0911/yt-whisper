@@ -1,4 +1,5 @@
 import { isActiveJob, type ApiError, type BackgroundRequest, type BackgroundResponse, type JobStatus, type PopupState } from "./contracts";
+import { formatSpeed } from "./speed";
 
 const stages: Record<JobStatus, string> = { queued: "等待處理", downloading: "下載音訊中", converting: "轉換音訊中", transcribing: "Whisper 辨識中", completed: "字幕已載入", failed: "處理失敗", canceled: "已取消處理" };
 type Messenger = (message: BackgroundRequest) => Promise<BackgroundResponse>;
@@ -20,7 +21,9 @@ export function mountPopup(root: Document, send: Messenger, refreshMs = 1000): (
     get<HTMLButtonElement>("pair").disabled = busy;
     get("video-title").textContent = state?.page?.title || "請開啟一般公開的 YouTube 影片";
     get("video-detail").textContent = state?.page ? `${Math.round(state.page.durationMs / 1000)} 秒 · ${state.page.videoId}` : "載入擴充套件後，請重新整理影片頁面。";
-    get("job-status").textContent = state?.job ? state.cacheHit && state.job.status === "completed" ? "已從本機快取載入字幕" : stages[state.job.status] : "";
+    const job = state?.job;
+    const jobText = job ? state?.cacheHit && job.status === "completed" ? "已從本機快取載入字幕" : stages[job.status] : "";
+    get("job-status").textContent = job?.status === "downloading" && typeof job.speed === "number" ? `${jobText} · ${formatSpeed(job.speed)}` : jobText;
     const progress = get<HTMLProgressElement>("progress");
     progress.hidden = !active;
     if (typeof state?.job?.progress === "number") progress.value = Math.min(1, Math.max(0, state.job.progress));

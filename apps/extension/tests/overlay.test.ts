@@ -137,6 +137,17 @@ describe("processing card", () => {
     expect(video.currentTime).toBe(0);
   });
 
+  it("appends download speed to the status text only while downloading", () => {
+    const { overlay, card } = fixture();
+    overlay.setProgress(progress("downloading", 0.3, 2621440));
+    expect(card.textContent).toContain("正在下載音訊… · 2.5 MB/s");
+    overlay.setProgress(progress("downloading", 0.31, 9216));
+    expect(card.textContent).toContain("正在下載音訊… · 9 KB/s");
+    overlay.setProgress(progress("transcribing", null, 500 * 1024));
+    expect(card.textContent).toContain("正在辨識字幕…");
+    expect(card.textContent).not.toContain("KB/s");
+  });
+
   it("renders failure text safely and leaves cancellation without stale progress", () => {
     const { overlay, video, container, card } = fixture();
     overlay.setProgress({ ...progress("failed"), error: { code: "DOWNLOAD_FAILED", message: "<img src=x onerror=alert(1)>", retryable: true } });
